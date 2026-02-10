@@ -1,0 +1,20 @@
+dataset_class: FashionMNIST
+data_dir: ./datasets
+random_seeds: [2, 25, 42, 52, 99, 103, 250, 666, 777, 2026]
+
+# c from 0 to 1 inclusive with step 0.1
+c_values:
+  [0.01, 0.03, 0.05, 0.07, 0.09, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+scenarios: [case-control]
+selection_strategies: ["random"]
+
+# Optional knobs
+val_ratio: 0.01
+target_prevalence: null
+with_replacement: true
+also_print_dataset_stats: false
+
+# Multi-class to binary mapping
+label_scheme:
+  positive_classes: [0, 2, 3, 4, 6]
+  negative_classes: [1, 5, 7, 8, 9]

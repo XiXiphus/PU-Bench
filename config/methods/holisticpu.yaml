@@ -1,0 +1,36 @@
+holisticpu:
+  optimizer: "sgd"
+  lr: 0.01
+  weight_decay: 0.0005
+  momentum: 0.9
+  nesterov: true
+  batch_size: 256
+  phase1_epochs: 10
+  phase2_epochs: 100
+  seed: 42
+  warmup_steps: 0
+  lambda_u: 1.0
+  label_smoothing: 0.05
+  # Parameters from original implementation for phase 2
+  mu: 1
+  T: 1.0
+  threshold: 0.9
+  # Vector augmentations (non-image)
+  vec_weak_noise_std: 0.01
+  vec_strong_noise_std: 0.05
+  vec_strong_dropout: 0.05
+  use_three_sigma: true
+  label_scheme:
+    true_positive_label: 1
+    true_negative_label: 0
+    pu_labeled_label: 1
+    pu_unlabeled_label: -1
+  checkpoint:
+    enabled: true
+    save_model: false
+    monitor: "val_f1"
+    mode: "max"
+    early_stopping:
+      enabled: true
+      patience: 20
+      min_delta: 0.0001

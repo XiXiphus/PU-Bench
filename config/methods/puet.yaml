@@ -1,0 +1,19 @@
+puet:
+  # Model hyperparameters
+  n_estimators: 30
+  risk_estimator: "nnPU" # 'nnPU', 'uPU', or 'PN'
+  loss: "quadratic" # 'quadratic' or 'logistic'
+  max_depth: 30 # null means no limit
+  min_samples_leaf: 1
+  max_features: "sqrt"
+  max_candidates: 1
+  n_jobs: -1 # Use all available cores
+
+  # Benchmark settings
+  seed: 42
+
+  label_scheme:
+    true_positive_label: 1
+    true_negative_label: 0
+    pu_labeled_label: 1
+    pu_unlabeled_label: -1

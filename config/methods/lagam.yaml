@@ -1,0 +1,41 @@
+lagam:
+  optimizer: "sgd"
+  lr: 0.001
+  weight_decay: 0.0001
+  momentum: 0.9
+  batch_size: 64
+  num_epochs: 50
+  seed: 42
+
+  # LaGAM specific parameters
+  warmup_epoch: 15
+  num_cluster: 50
+  temperature: 0.07
+  cont_cutoff: true
+  knn_aug: true
+  num_neighbors: 10
+  identifier: "classifier" # For meta-learning updates
+  contrastive_clustering: 1
+  cont_weight: 1.0
+  meta_lr: 0.001
+  rho_start: 0.95
+  rho_end: 0.8
+
+  # This ratio is used if the dataset config does not provide a validation set
+  lagam_val_ratio: 0.1
+
+  label_scheme:
+    true_positive_label: 1
+    true_negative_label: 0
+    pu_labeled_label: 1
+    pu_unlabeled_label: -1
+
+  checkpoint:
+    enabled: true
+    save_model: false
+    monitor: "val_f1"
+    mode: "max"
+    early_stopping:
+      enabled: true
+      patience: 25
+      min_delta: 0.0001

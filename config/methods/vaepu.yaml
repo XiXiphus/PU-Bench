@@ -1,0 +1,21 @@
+vaepu:
+  # Basic settings - these parameters are common to all datasets
+  seed: 42
+
+  # Adaptive configuration flag - trainer will automatically adjust hyperparameters based on dataset type
+  adaptive_config: true
+
+  # Default checkpoint settings - can be overridden by dataset-specific configuration
+  checkpoint:
+    enabled: true
+    save_model: false
+    monitor: "val_f1"
+    early_stopping:
+      enabled: true
+      patience: 30
+      min_delta: 0.0001
+
+  # Optional manual override parameters - if these parameters are set, they will override adaptive selection
+  # Leave empty to use adaptive configuration
+  manual_override:
+    threshold_selection: "youden"

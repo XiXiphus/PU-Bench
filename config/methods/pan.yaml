@@ -1,0 +1,28 @@
+pan:
+  # Optimizer settings
+  lr_r: 0.0003
+  lr_d: 0.0003
+  batch_size: 64
+  num_epochs: 120
+  seed: 42
+
+  # PAN specific loss weights
+  co_pu: 1.5 # Weight for adversarial loss
+  co_rr: 0.4 # Weight for reliability loss (slightly stronger)
+
+  # Checkpoint handler
+  checkpoint:
+    enabled: true
+    save_model: false
+    monitor: "val_f1"
+    mode: "max"
+    early_stopping:
+      enabled: true
+      patience: 25
+      min_delta: 0.0001
+
+  label_scheme:
+    true_positive_label: 1
+    true_negative_label: 0
+    pu_labeled_label: 1
+    pu_unlabeled_label: -1

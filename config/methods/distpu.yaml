@@ -1,0 +1,33 @@
+distpu:
+  optimizer: "adam"
+  lr: 0.0003
+  weight_decay: 0.0005
+  momentum: 0.9
+  nesterov: true
+  batch_size: 256
+  seed: 42
+  checkpoint:
+    enabled: true
+    save_model: false
+    monitor: val_f1
+    mode: max
+    early_stopping:
+      enabled: true
+      patience: 10
+      min_delta: 0.0001
+  stages:
+    warm_up:
+      epochs: 20
+      lr: 0.0003
+    mixup:
+      epochs: 20
+      lr: 0.00005
+      co_mix_entropy: 0.04
+      co_mixup: 5.0
+  warmup_steps: 0
+  visualize_trends: false
+  label_scheme:
+    true_positive_label: 1
+    true_negative_label: 0
+    pu_labeled_label: 1
+    pu_unlabeled_label: -1

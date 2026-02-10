@@ -1,0 +1,79 @@
+# MacOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs and Databases
+*.log
+*.sqlite
+
+# Testing and Linting
+.tox/
+.nox/
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# PU-Bench Specific - Experiments & Outputs
+results/
+logs/
+checkpoints/
+runs/
+outputs/
+*.pth
+
+# Ignore root-level JSON files (often experiment summaries), but keep config JSONs if any
+*.json
+!config/**/*.json
+
+# Datasets (Downloaded data)
+datasets/
+data/cifar-10-batches-py/
+data/FashionMNIST/
+data/MNIST/
+data/Alzheimer_MRI_4_classes_dataset/
+data/aclImdb/
+data/20news_sklearn/
+cifar-10-batches-py/
+MNIST/
+FashionMNIST/
+20news_sklearn/
+aclImdb/
+*.tar.gz
+*.zip

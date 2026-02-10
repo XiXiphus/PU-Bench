@@ -1,0 +1,44 @@
+bbepu:
+  # Optimizer settings
+  optimizer: "adam"
+  lr: 0.0003
+  weight_decay: 0.0001
+  batch_size: 128
+  seed: 42
+
+  # Two-stage training epochs
+  warmup_epochs: 8 # Initial nnPU training with default prior
+  main_epochs: 40 # BBE-guided training with adaptive prior
+
+  # BBE (Binomial Bias Estimation) parameters
+  delta: 0.1 # Confidence parameter for DKW bound
+  gamma_bbe: 0.01 # Relaxation parameter for BBE
+  bbe_update_freq: 0 # Disable online update; use validation-based estimate at stage switch
+
+  # nnPU parameters
+  gamma: 0.5 # nnPU gamma parameter (stabilize on text)
+  beta: 0.1 # nnPU beta parameter (non-negative constraint)
+  loss_type: "sigmoid" # Loss function type: "sigmoid", "logistic", "squared"
+
+  # Label scheme (standard for PU learning)
+  label_scheme:
+    true_positive_label: 1
+    true_negative_label: 0
+    pu_labeled_label: 1
+    pu_unlabeled_label: -1
+
+  # Checkpoint handler
+  checkpoint:
+    enabled: true
+    save_model: false
+    monitor: "val_f1"
+    mode: "max"
+    verbose: true
+    early_stopping:
+      enabled: true
+      patience: 20
+      min_delta: 0.0001
+
+  # Optional: logging control
+  log_interval: 1
+  silence_metrics_before_epoch: 0

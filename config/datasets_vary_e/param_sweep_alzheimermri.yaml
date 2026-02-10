@@ -1,0 +1,23 @@
+dataset_class: AlzheimerMRI
+data_dir: ./datasets/Alzheimer_MRI_4_classes_dataset
+random_seeds: [2, 25, 42, 52, 99, 103, 250, 666, 777, 2026]
+
+# c from 0 to 1 inclusive with step 0.1
+c_values: [0.05, 0.5]
+scenarios: [case-control]
+selection_strategies: ["sar_pusb", "sar_lbeA", "sar_lbeB"]
+
+# Optional knobs
+val_ratio: 0.01
+target_prevalence: null
+with_replacement: true
+# Control whether dataset statistics are also printed to stdout
+also_print_dataset_stats: false
+
+# Multi-class to binary mapping
+label_scheme:
+  positive_classes: ["NonDemented"] # Normal
+  negative_classes: ["VeryMildDemented", "ModerateDemented", "MildDemented"] # Dementia patients
+
+# Image preprocessing parameters
+image_size: [128, 128]

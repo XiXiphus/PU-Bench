@@ -1,0 +1,23 @@
+nnpusb:
+  optimizer: "adam"
+  lr: 0.0003
+  weight_decay: 0.0001
+  batch_size: 256
+  num_epochs: 40
+  seed: 42
+  gamma: 1.0
+  beta: 0.0
+  label_scheme:
+    true_positive_label: 1
+    true_negative_label: 0
+    pu_labeled_label: 1
+    pu_unlabeled_label: -1
+  checkpoint:
+    enabled: true
+    save_model: false
+    monitor: "val_f1"
+    mode: "max"
+    early_stopping:
+      enabled: true
+      patience: 10
+      min_delta: 0.0001

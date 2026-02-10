@@ -1,0 +1,52 @@
+pulda:
+  # Optimizer settings (alignment stage)
+  optimizer: "adam"
+  lr: 0.001 # Alignment stage learning rate
+  weight_decay: 0.0001 # Alignment stage weight decay (original ~1e-4)
+  batch_size: 256 # Original paper uses 256 (can reduce for memory constraints)
+  num_epochs: 120 # Total epochs (warm-up + alignment), original ~60+60
+  seed: 42
+
+  # Warm-up stage optimizer settings
+  warm_up_lr: 0.0001 # Warm-up stage learning rate (original ~1e-4)
+  warm_up_weight_decay: 0.0005 # Warm-up stage weight decay (original ~5e-4)
+
+  # PULDA specific loss parameters
+  tmpr: 3.5 # Temperature for softplus distance
+  two_way: 1 # Enable two-way sigmoid loss
+  margin: 0.6 # Margin for two-way sigmoid loss
+
+  # EMA parameters (Exponential Moving Average)
+  EMA: 1 # Enable EMA (1=True, 0=False)
+  alpha_U: 0.85 # EMA momentum for unlabeled predictions
+  alpha_CN: 0.5 # EMA momentum for negative class margin loss
+
+  # PULDA specific training schedule
+  warm_up_epochs: 60 # Original implementation
+  pu_epochs: 60 # Original implementation
+
+  # Mixup parameters
+  co_mixup: 4.2 # Mixup loss coefficient
+  alpha: 11.0 # Beta distribution alpha for mixup
+
+  # Resampling settings (optional, for balanced P/U batches)
+  resample: 1 # Enable P/U resampling (1=True, 0=False)
+  P_batch_size: 16 # Positive batch size when resampling
+  U_batch_size: 128 # Unlabeled batch size when resampling
+
+  # Checkpoint handler
+  checkpoint:
+    save_model: false
+    enabled: true
+    monitor: "val_f1"
+    mode: "max"
+    early_stopping:
+      enabled: true
+      patience: 20
+      min_delta: 0.0001
+
+  label_scheme:
+    true_positive_label: 1
+    true_negative_label: 0
+    pu_labeled_label: 1
+    pu_unlabeled_label: -1

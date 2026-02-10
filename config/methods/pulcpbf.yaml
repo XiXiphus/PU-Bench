@@ -1,0 +1,54 @@
+pulcpbf:
+  # Dataset/model
+  dataset_class: CIFAR10
+  model: cnn_cifar10
+
+  # Optimization
+  lr: 0.002
+  weight_decay: 0.005
+  momentum: 0.9
+  nesterov: true
+  batch_size: 64
+  num_epochs: 50 # used as phase2_epochs if not specified
+  num_workers: 4
+
+  # Phase-1 (warming-up)
+  phase1_epochs: 20
+  loss: logistic # logistic | sigmoid
+  alpha: 0.5 # asymmetric penalty in warmup (beta depends on this and prior_)
+  co_entropy: 0.0 # entropy minimization coefficient in phase-1
+
+  # Pseudo-label generation
+  pseudo_label_strategy: trend # trend | alpha_range
+  alpha_list: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+  use_three_sigma: false
+
+  # Phase-2 (fine-tuning)
+  phase2_epochs: 50
+  T: 0.5 # temperature for pseudo-label sharpening
+  mask_threshold: 0.9 # confidence threshold for strong branch
+  lambda_u: 0.85 # weight for unlabeled consistency loss (matches original)
+  warmup_steps: 0
+  co_entropy_phase2: 0.0 # optional: if needed separately; otherwise co_entropy is reused
+
+  # Vector augment (for non-image datasets)
+  vec_weak_noise_std: 0.02
+  vec_weak_dropout: 0.0
+  vec_strong_noise_std: 0.1
+  vec_strong_dropout: 0.1
+  vec_sign_flip_ratio: 0.05
+
+  # Logging / seed
+  seed: 42
+  log_interval: 1
+  checkpoint:
+    enabled: true
+    save_dir: checkpoints
+    monitor: val_f1
+    mode: max
+    save_model: false
+    verbose: true
+    early_stopping:
+      enabled: false
+      patience: 10
+      min_delta: 0.0001

@@ -1,0 +1,44 @@
+selfpu:
+  optimizer: "adam"
+  lr: 0.001
+  weight_decay: 0.0005
+  batch_size: 256
+  num_epochs: 40
+  seed: 42
+
+  # Silence metrics table printing in the first few epochs (hide F1=0 noise during warmup period)
+  silence_metrics_before_epoch: 10
+
+  self_paced_enabled: true
+  self_paced_start: 5
+  self_paced_frequency: 2
+  self_paced_rampup: 30
+  self_paced_top_p1: 0.1
+  self_paced_top_p2: 0.2
+
+  replacement: true
+  increasing: true
+  flex_ratio: 0.0
+
+  pu_loss_weight: 1.0
+
+  mean_teacher_enabled: true
+  mean_teacher_start: 10
+  ema_decay: 0.999
+  consistency_weight: 0.3
+  consistency_rampup: 20
+
+  label_scheme:
+    true_positive_label: 1
+    true_negative_label: 0
+    pu_labeled_label: 1
+    pu_unlabeled_label: -1
+  checkpoint:
+    enabled: true
+    save_model: false
+    monitor: "val_f1"
+    mode: "max"
+    early_stopping:
+      enabled: true
+      patience: 10
+      min_delta: 0.0001

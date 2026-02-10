@@ -1,0 +1,32 @@
+lbe:
+  optimizer: "adam"
+  lr: 0.0005
+  weight_decay: 0.0001
+  batch_size: 64
+  num_epochs: 20 # This will be the outer EM loop epochs
+  seed: 42
+
+  # LBE specific parameters
+  pretrain_epochs: 20
+  m_steps: 20 # M-steps per EM epoch, closer to the original implementation
+  # Memory- and stability-related knobs
+  subset_ratio: 0.1
+  topk_keep: 0.8
+  m_step_eval_batch_size: 512
+  m_step_train_batch_size: 512
+
+  label_scheme:
+    true_positive_label: 1
+    true_negative_label: 0
+    pu_labeled_label: 1
+    pu_unlabeled_label: -1 # In LBE code, this is q=0
+
+  checkpoint:
+    enabled: true
+    save_model: false
+    monitor: "val_f1"
+    mode: "max"
+    early_stopping:
+      enabled: true
+      patience: 5
+      min_delta: 0.0001

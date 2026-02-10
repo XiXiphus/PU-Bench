@@ -1,0 +1,25 @@
+# NOTE:
+# Dependencies are intentionally unpinned. Installing latest stable versions is expected to work in normal cases.
+# For exact reproducibility, create and share a locked file (e.g., `pip freeze > requirements.lock.txt`).
+faiss-cpu
+torch
+torchvision
+numpy
+scipy
+scikit-learn
+tqdm
+rich
+pyyaml
+pandas
+jenkspy
+dill
+pillow
+datasets
+pyarrow
+tabulate
+matplotlib
+joblib
+seaborn
+sentence-transformers
+torchtext
+transformers
