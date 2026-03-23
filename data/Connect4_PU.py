@@ -3,7 +3,7 @@ from typing import Tuple
 
 from .data_utils import (
     PUDataset,
-    split_train_val,
+    split_pu_val,
     create_pu_training_set,
     print_dataset_statistics,
     resample_by_prevalence,
@@ -36,6 +36,10 @@ def load_connect4_pu(
     Dataset notes:
       - Features: 42 categorical cells (values typically in {'x','o','b'}) + optional turn-related attrs.
       - Target: {'win','loss','draw'} → map to binary with 'win'→1 (positive), others→0 (negative).
+
+    Validation set is split AFTER PU labeling so that it preserves the PU
+    structure (labeled positive vs. unlabeled), enabling realistic proxy-metric
+    based model selection.
     """
     rng = np.random.RandomState(random_seed)
 
@@ -71,16 +75,9 @@ def load_connect4_pu(
         else:
             X_dense = X_arr.astype(np.float32)
 
-    # 4) Train/Val/Test split: first split test from full, then val from train
+    # 4) Train/Test split: split test from full data (keep trainval for PU creation)
     X_trainval, X_test, y_trainval, y_test = train_test_split(
         X_dense, y_bin, test_size=0.2, stratify=y_bin, random_state=random_seed
-    )
-    X_train, X_val, y_train, y_val = train_test_split(
-        X_trainval,
-        y_trainval,
-        test_size=val_ratio,
-        stratify=y_trainval,
-        random_state=random_seed,
     )
 
     # 5) Optional test prevalence adjustment
@@ -89,47 +86,54 @@ def load_connect4_pu(
             X_test, y_test, target_prevalence, random_seed
         )
 
-    # 6) Create PU training set
-    pu_train_features, pu_train_true_labels_01, train_labeled_mask = (
-        create_pu_training_set(
-            X_train,
-            y_train,
-            n_labeled=n_labeled,
-            labeled_ratio=labeled_ratio,
-            selection_strategy=selection_strategy,
-            scenario=scenario,
-            with_replacement=with_replacement,
-            case_control_mode=case_control_mode,
-        )
+    # 6) Create PU training set from ALL training data (before val split)
+    pu_features, pu_true_labels_01, labeled_mask = create_pu_training_set(
+        X_trainval,
+        y_trainval,
+        n_labeled=n_labeled,
+        labeled_ratio=labeled_ratio,
+        selection_strategy=selection_strategy,
+        scenario=scenario,
+        with_replacement=with_replacement,
+        case_control_mode=case_control_mode,
     )
 
-    # 7) Map to final label coding
-    final_pu_train_true_labels = np.full_like(
-        pu_train_true_labels_01, true_negative_label
-    )
-    final_pu_train_true_labels[pu_train_true_labels_01 == 1] = true_positive_label
+    # 7) Split validation from PU data (AFTER PU labeling) to preserve PU structure
+    (
+        pu_train_features, pu_train_true_labels_01, train_labeled_mask,
+        pu_val_features, pu_val_true_labels_01, val_labeled_mask,
+    ) = split_pu_val(pu_features, pu_true_labels_01, labeled_mask, val_ratio, random_state=random_seed)
 
-    final_val_labels = np.full_like(y_val, true_negative_label)
-    final_val_labels[y_val == 1] = true_positive_label
+    # 8) --- Label formatting ---
 
+    # Train true_labels
+    final_train_true_labels = np.full_like(pu_train_true_labels_01, true_negative_label)
+    final_train_true_labels[pu_train_true_labels_01 == 1] = true_positive_label
+    # Train pu_labels
+    final_train_pu_labels = np.full(len(pu_train_true_labels_01), pu_unlabeled_label, dtype=int)
+    final_train_pu_labels[train_labeled_mask == 1] = pu_labeled_label
+
+    # Val true_labels (for Oracle metrics)
+    final_val_true_labels = np.full_like(pu_val_true_labels_01, true_negative_label)
+    final_val_true_labels[pu_val_true_labels_01 == 1] = true_positive_label
+    # Val pu_labels (PU structure preserved!)
+    final_val_pu_labels = np.full(len(pu_val_true_labels_01), pu_unlabeled_label, dtype=int)
+    final_val_pu_labels[val_labeled_mask == 1] = pu_labeled_label
+
+    # Test true_labels
     final_test_labels = np.full_like(y_test, true_negative_label)
     final_test_labels[y_test == 1] = true_positive_label
 
-    final_pu_train_labels = np.full(
-        len(pu_train_true_labels_01), pu_unlabeled_label, dtype=int
-    )
-    final_pu_train_labels[train_labeled_mask == 1] = pu_labeled_label
-
-    # 8) Build datasets
+    # 9) Build datasets
     train_dataset = PUDataset(
         features=pu_train_features,
-        pu_labels=final_pu_train_labels,
-        true_labels=final_pu_train_true_labels,
+        pu_labels=final_train_pu_labels,
+        true_labels=final_train_true_labels,
     )
     val_dataset = PUDataset(
-        features=X_val,
-        pu_labels=final_val_labels,
-        true_labels=final_val_labels,
+        features=pu_val_features,
+        pu_labels=final_val_pu_labels,
+        true_labels=final_val_true_labels,
     )
     test_dataset = PUDataset(
         features=X_test,
@@ -137,7 +141,7 @@ def load_connect4_pu(
         true_labels=final_test_labels,
     )
 
-    # 9) Stats
+    # 10) Stats
     print_dataset_statistics(
         train_dataset,
         val_dataset,

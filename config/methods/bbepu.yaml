@@ -31,7 +31,7 @@ bbepu:
   checkpoint:
     enabled: true
     save_model: false
-    monitor: "val_f1"
+    monitor: "val_proxy_acc"
     mode: "max"
     verbose: true
     early_stopping:

@@ -25,7 +25,7 @@ from rich.table import Table
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 import os
 from torch.utils.data import Subset
-from .train_utils import evaluate_metrics, seed_worker
+from .train_utils import evaluate_metrics, evaluate_proxy_metrics, seed_worker
 from data.holisticpu_dataset import TransformHolisticPU, HolisticPUDatasetWrapper
 from data.vector_augment import (
     VectorAugPUDatasetWrapper,
@@ -731,6 +731,20 @@ class HolisticPUTrainer(BaseTrainer):
                 if self.validation_loader is not None
                 else None
             )
+            scenario = self.params.get("scenario", "single")
+            proxy_train = evaluate_proxy_metrics(
+                self.get_eval_model(), self.train_loader, self.device, self.prior, scenario
+            )
+            train_metrics = {**train_metrics, **proxy_train}
+            if self.validation_loader is not None:
+                proxy_val = evaluate_proxy_metrics(
+                    self.get_eval_model(),
+                    self.validation_loader,
+                    self.device,
+                    self.prior,
+                    scenario,
+                )
+                val_metrics = {**val_metrics, **proxy_val}
             self._print_metrics(
                 epoch,
                 num_epochs,

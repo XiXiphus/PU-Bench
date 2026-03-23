@@ -21,6 +21,7 @@ from rich.table import Table
 
 from .train_utils import (
     evaluate_metrics,
+    evaluate_proxy_metrics,
     prepare_loaders,
     select_model,
     set_global_seed,
@@ -367,6 +368,7 @@ class BaseTrainer(ABC):
     # Common epoch runner
     def _run_epochs(self, num_epochs: int, stage_name: str = "Training"):
         test_metrics = {}  # Initialize with a default value
+        scenario = self.params.get("scenario", "single")
 
         for epoch_idx in tqdm(
             range(1, num_epochs + 1), desc=f"{stage_name} ({self.method.upper()})"
@@ -374,20 +376,41 @@ class BaseTrainer(ABC):
             self.global_epoch += 1  # Use accumulator for multi-stage training
             self.train_one_epoch(epoch_idx)
 
-            # Evaluation
-            train_metrics = evaluate_metrics(
+            # --- Oracle metrics (true labels) ---
+            train_oracle = evaluate_metrics(
                 self.model, self.train_loader, self.device, self.prior
             )
-            test_metrics = evaluate_metrics(
+            test_oracle = evaluate_metrics(
                 self.model, self.test_loader, self.device, self.prior
             )
-            val_metrics = (
+            val_oracle = (
                 evaluate_metrics(
                     self.model, self.validation_loader, self.device, self.prior
                 )
                 if self.validation_loader is not None
                 else None
             )
+
+            # --- Proxy metrics (PU labels only) on train and val ---
+            train_proxy = evaluate_proxy_metrics(
+                self.model, self.train_loader, self.device, self.prior, scenario
+            )
+            val_proxy = (
+                evaluate_proxy_metrics(
+                    self.model, self.validation_loader, self.device, self.prior, scenario
+                )
+                if self.validation_loader is not None
+                else None
+            )
+
+            # Merge for display and checkpoint
+            train_metrics = {**train_oracle, **train_proxy}
+            test_metrics = test_oracle
+            val_metrics = None
+            if val_oracle is not None:
+                val_metrics = {**val_oracle}
+                if val_proxy is not None:
+                    val_metrics.update(val_proxy)
 
             # Rich table (optionally silence early epochs, e.g., to hide warmup with trivial F1)
             silence_before = self.params.get("silence_metrics_before_epoch", 0)
@@ -419,15 +442,12 @@ class BaseTrainer(ABC):
                         def _fallback_key(key: str, prefix: str):
                             return prefix + key.split("_", 1)[1] if "_" in key else None
 
-                        # Try test_*
                         test_key = _fallback_key(monitor, "test_")
                         train_key = _fallback_key(monitor, "train_")
                         if test_key and test_key in all_metrics:
-                            # Temporarily copy all_metrics[monitor]
                             all_metrics[monitor] = all_metrics[test_key]
                         elif train_key and train_key in all_metrics:
                             all_metrics[monitor] = all_metrics[train_key]
-                        # Otherwise keep original logic, enter internal warning
                 except Exception:
                     pass
 
@@ -469,21 +489,36 @@ class BaseTrainer(ABC):
             table.add_column("Val", style="yellow")
         table.add_column("Test", style="green")
 
-        for metric in ["accuracy", "error", "f1", "precision", "recall", "auc", "risk"]:
-            if metric in train_metrics and metric in test_metrics:
-                if val_metrics is not None and metric in val_metrics:
-                    table.add_row(
-                        metric,
-                        f"{train_metrics[metric]:.4f}",
-                        f"{val_metrics[metric]:.4f}",
-                        f"{test_metrics[metric]:.4f}",
-                    )
-                else:
-                    table.add_row(
-                        metric,
-                        f"{train_metrics[metric]:.4f}",
-                        f"{test_metrics[metric]:.4f}",
-                    )
+        # Oracle metrics (available on all splits)
+        oracle_keys = [
+            "oracle_accuracy", "oracle_f1", "oracle_precision",
+            "oracle_recall", "oracle_auc",
+        ]
+        # Proxy metrics (available on train/val only, not test)
+        proxy_keys = ["proxy_acc", "proxy_auc"]
+
+        for metric in oracle_keys:
+            train_val = train_metrics.get(metric)
+            test_val = test_metrics.get(metric)
+            if train_val is None and test_val is None:
+                continue
+            row = [metric, f"{train_val:.4f}" if train_val is not None else "N/A"]
+            if val_metrics is not None:
+                v = val_metrics.get(metric)
+                row.append(f"{v:.4f}" if v is not None else "N/A")
+            row.append(f"{test_val:.4f}" if test_val is not None else "N/A")
+            table.add_row(*row)
+
+        for metric in proxy_keys:
+            train_val = train_metrics.get(metric)
+            if train_val is None:
+                continue
+            row = [metric, f"{train_val:.4f}"]
+            if val_metrics is not None:
+                v = val_metrics.get(metric)
+                row.append(f"{v:.4f}" if v is not None else "N/A")
+            row.append("--")  # proxy metrics not computed on test
+            table.add_row(*row)
 
         self.console.print(table)
         if self.file_console:
@@ -636,7 +671,7 @@ class BaseTrainer(ABC):
             self.checkpoint_handler = ModelCheckpoint(
                 save_dir=save_dir,
                 filename=filename,
-                monitor=checkpoint_params.get("monitor", "test_f1"),
+                monitor=checkpoint_params.get("monitor", "val_proxy_acc"),
                 mode=checkpoint_params.get("mode", "max"),
                 save_model=checkpoint_params.get("save_model", True),
                 verbose=checkpoint_params.get("verbose", True),

@@ -17,7 +17,7 @@ from backbone.vaepu_models import (
     VAEConvDecoder,
     VAEConvDiscriminator,
 )
-from .train_utils import select_model, _zero_one_loss
+from .train_utils import select_model, evaluate_proxy_metrics
 from data.lagam_dataset import LaGAMDatasetWrapper
 
 
@@ -610,6 +610,20 @@ class VAEPUTrainer(BaseTrainer):
                 if self.validation_loader is not None
                 else None
             )
+            scenario = self.params.get("scenario", "single")
+            proxy_train = evaluate_proxy_metrics(
+                self.model, self.train_loader, self.device, self.prior, scenario
+            )
+            train_metrics = {**train_metrics, **proxy_train}
+            if self.validation_loader is not None:
+                proxy_val = evaluate_proxy_metrics(
+                    self.model,
+                    self.validation_loader,
+                    self.device,
+                    self.prior,
+                    scenario,
+                )
+                val_metrics = {**val_metrics, **proxy_val}
             self._print_metrics(
                 epoch,
                 self.main_epochs,
@@ -1097,7 +1111,6 @@ class VAEPUTrainer(BaseTrainer):
 
     def evaluate_metrics_pn(self, loader):
         y_true_all, y_pred_all = [], []
-        total_risk_sum = 0.0
         self.model.eval()
         with torch.no_grad():
             for x, t, y_true, _, _ in loader:
@@ -1116,16 +1129,6 @@ class VAEPUTrainer(BaseTrainer):
                 preds_binary = (pos_logit > thr).long()
                 y_true_all.extend(y_true.cpu().numpy())
                 y_pred_all.extend(preds_binary.cpu().numpy())
-
-                eval_outputs = self._pn_pos_logit(outputs)
-                pos_mask, unl_mask = (t == 1), (t == -1)
-                risk_pos_term = _zero_one_loss(eval_outputs[pos_mask]).sum()
-                risk_neg_term = _zero_one_loss(-eval_outputs[pos_mask]).sum()
-                risk_unl_term = _zero_one_loss(-eval_outputs[unl_mask]).sum()
-                batch_risk = (
-                    self.prior * (risk_pos_term - risk_neg_term) + risk_unl_term
-                )
-                total_risk_sum += batch_risk.item()
         self.model.train()
 
         from sklearn.metrics import (
@@ -1137,7 +1140,6 @@ class VAEPUTrainer(BaseTrainer):
         )
 
         acc = accuracy_score(y_true_all, y_pred_all)
-        risk = total_risk_sum / max(1, len(y_true_all))
         f1 = f1_score(y_true_all, y_pred_all)
         prec = precision_score(y_true_all, y_pred_all, zero_division=0)
         rec = recall_score(y_true_all, y_pred_all, zero_division=0)
@@ -1159,13 +1161,11 @@ class VAEPUTrainer(BaseTrainer):
             auc = float("nan")
 
         return {
-            "error": 1 - acc,
-            "risk": risk,
-            "accuracy": acc,
-            "precision": prec,
-            "recall": rec,
-            "f1": f1,
-            "auc": auc,
+            "oracle_accuracy": acc,
+            "oracle_precision": prec,
+            "oracle_recall": rec,
+            "oracle_f1": f1,
+            "oracle_auc": auc,
         }
 
     def _compute_optimal_threshold_on_val(self, mode: str = "f1") -> float:

@@ -3,7 +3,7 @@ from typing import Tuple
 
 from .data_utils import (
     PUDataset,
-    split_train_val,
+    split_pu_val,
     create_pu_training_set,
     print_dataset_statistics,
 )
@@ -32,13 +32,17 @@ def load_mushrooms_pu(
 
     Labels: 'p' (poisonous) vs 'e' (edible). We map 'p' -> 1 (positive), 'e' -> 0 (negative) by default.
     Features: all nominal -> one-hot encoded dense float32.
+
+    Validation set is split AFTER PU labeling so that it preserves the PU
+    structure (labeled positive vs. unlabeled), enabling realistic proxy-metric
+    based model selection.
     """
     rng = np.random.RandomState(random_seed)
 
     # 1) Load from OpenML
-    # Avoid hard network requirement by trying sklearn's fetch_openml
     from sklearn.datasets import fetch_openml
     from sklearn.preprocessing import OneHotEncoder
+    from sklearn.model_selection import train_test_split
 
     ds = fetch_openml(name="mushroom", version=1, as_frame=True, data_home=data_dir)
     X_df = ds.data
@@ -52,79 +56,60 @@ def load_mushrooms_pu(
     X_onehot = enc.fit_transform(X_df.astype(str))
     X_onehot = X_onehot.astype(np.float32)
 
-    # 4) Train/Val split
-    X_train, y_train, X_val, y_val = split_train_val(
-        X_onehot, y_bin, val_ratio, random_state=random_seed
-    )
-
-    # 5) Optional test prevalence adjustment: For Mushrooms we keep natural test split by random split from remaining
-    # Here we split test from remaining data not used in train/val
-    # Using a simple random split from remaining pool (simulate standard benchmark pattern)
-    # Build test as remaining from original after removing train indices already handled by split_train_val
-    # Since split_train_val returns only train/val, we will create test from the full set by another split
-    # Strategy: split full into (train+val) vs test with ratio 0.2 (complement of (1 - val_ratio) may overfit)
-    # To keep consistency with other loaders that use original dataset's test split, we simply reuse X_val as validation
-    # and create a separate test via another random split from the leftover indices.
-    # Here, a simple approach: split X_onehot/y_bin into train_and_val vs test (20%), then within train_and_val we already did val split above.
-
-    # If val_ratio < 1.0, create an independent test split from full data with 20%
+    # 4) Train/Test split: split test from full data (keep trainval for PU creation)
     test_ratio = 0.2
-    from sklearn.model_selection import train_test_split
-
     X_trainval, X_test, y_trainval, y_test = train_test_split(
         X_onehot, y_bin, test_size=test_ratio, stratify=y_bin, random_state=random_seed
     )
 
-    # Recompute train vs val from trainval to align indices
-    X_train, X_val, y_train, y_val = train_test_split(
+    # 5) Create PU training set from ALL training data (before val split)
+    pu_features, pu_true_labels_01, labeled_mask = create_pu_training_set(
         X_trainval,
         y_trainval,
-        test_size=val_ratio,
-        stratify=y_trainval,
-        random_state=random_seed,
+        n_labeled=n_labeled,
+        labeled_ratio=labeled_ratio,
+        selection_strategy=selection_strategy,
+        scenario=scenario,
+        with_replacement=with_replacement,
+        case_control_mode=case_control_mode,
     )
 
-    # 6) Create PU training set
-    pu_train_features, pu_train_true_labels_01, train_labeled_mask = (
-        create_pu_training_set(
-            X_train,
-            y_train,
-            n_labeled=n_labeled,
-            labeled_ratio=labeled_ratio,
-            selection_strategy=selection_strategy,
-            scenario=scenario,
-            with_replacement=with_replacement,
-            case_control_mode=case_control_mode,
-        )
-    )
+    # 6) Split validation from PU data (AFTER PU labeling) to preserve PU structure
+    (
+        pu_train_features, pu_train_true_labels_01, train_labeled_mask,
+        pu_val_features, pu_val_true_labels_01, val_labeled_mask,
+    ) = split_pu_val(pu_features, pu_true_labels_01, labeled_mask, val_ratio, random_state=random_seed)
 
-    # 7) Map labels to requested coding
-    final_pu_train_true_labels = np.full_like(
-        pu_train_true_labels_01, true_negative_label
-    )
-    final_pu_train_true_labels[pu_train_true_labels_01 == 1] = true_positive_label
+    # 7) --- Label formatting ---
 
-    final_val_labels = np.full_like(y_val, true_negative_label)
-    final_val_labels[y_val == 1] = true_positive_label
+    # Train true_labels
+    final_train_true_labels = np.full_like(pu_train_true_labels_01, true_negative_label)
+    final_train_true_labels[pu_train_true_labels_01 == 1] = true_positive_label
+    # Train pu_labels
+    final_train_pu_labels = np.full(len(pu_train_true_labels_01), pu_unlabeled_label, dtype=int)
+    final_train_pu_labels[train_labeled_mask == 1] = pu_labeled_label
 
+    # Val true_labels (for Oracle metrics)
+    final_val_true_labels = np.full_like(pu_val_true_labels_01, true_negative_label)
+    final_val_true_labels[pu_val_true_labels_01 == 1] = true_positive_label
+    # Val pu_labels (PU structure preserved!)
+    final_val_pu_labels = np.full(len(pu_val_true_labels_01), pu_unlabeled_label, dtype=int)
+    final_val_pu_labels[val_labeled_mask == 1] = pu_labeled_label
+
+    # Test true_labels
     final_test_labels = np.full_like(y_test, true_negative_label)
     final_test_labels[y_test == 1] = true_positive_label
-
-    final_pu_train_labels = np.full(
-        len(pu_train_true_labels_01), pu_unlabeled_label, dtype=int
-    )
-    final_pu_train_labels[train_labeled_mask == 1] = pu_labeled_label
 
     # 8) Build datasets
     train_dataset = PUDataset(
         features=pu_train_features,
-        pu_labels=final_pu_train_labels,
-        true_labels=final_pu_train_true_labels,
+        pu_labels=final_train_pu_labels,
+        true_labels=final_train_true_labels,
     )
     val_dataset = PUDataset(
-        features=X_val,
-        pu_labels=final_val_labels,
-        true_labels=final_val_labels,
+        features=pu_val_features,
+        pu_labels=final_val_pu_labels,
+        true_labels=final_val_true_labels,
     )
     test_dataset = PUDataset(
         features=X_test,

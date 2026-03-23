@@ -151,6 +151,46 @@ def split_train_val(
     return train_f, train_y, val_f, val_y
 
 
+def split_pu_val(
+    features: np.ndarray,
+    true_labels: np.ndarray,
+    labeled_mask: np.ndarray,
+    val_ratio: float,
+    random_state: int = 42,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Split PU-structured data into training and validation portions.
+
+    This should be called AFTER ``create_pu_training_set`` so that both the
+    training and validation sets preserve the PU label structure (labeled
+    positives vs. unlabeled).
+
+    Returns:
+        (train_features, train_true_labels, train_labeled_mask,
+         val_features, val_true_labels, val_labeled_mask)
+    """
+    if val_ratio <= 0.0:
+        empty_f = np.empty((0, *features.shape[1:]), dtype=features.dtype)
+        empty_l = np.empty(0, dtype=true_labels.dtype)
+        empty_m = np.empty(0, dtype=labeled_mask.dtype)
+        return features, true_labels, labeled_mask, empty_f, empty_l, empty_m
+
+    n = len(features)
+    indices = np.arange(n)
+    np.random.RandomState(random_state).shuffle(indices)
+    n_val = int(n * val_ratio)
+    val_idx = indices[:n_val]
+    train_idx = indices[n_val:]
+
+    return (
+        features[train_idx],
+        true_labels[train_idx],
+        labeled_mask[train_idx],
+        features[val_idx],
+        true_labels[val_idx],
+        labeled_mask[val_idx],
+    )
+
+
 def create_pu_training_set(
     features: np.ndarray,
     labels: np.ndarray,

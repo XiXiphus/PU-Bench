@@ -3,7 +3,7 @@ import numpy as np
 from typing import Tuple
 from .data_utils import (
     PUDataset,
-    split_train_val,
+    split_pu_val,
     create_pu_training_set,
     print_dataset_statistics,
     resample_by_prevalence,
@@ -33,23 +33,9 @@ def load_mnist_pu(
     """
     Load, preprocess and return MNIST dataset for PU learning.
 
-    Args:
-        data_dir (str): Data storage directory.
-        positive_classes (list): MNIST digits defined as positive class.
-        negative_classes (list): MNIST digits defined as negative class.
-        n_labeled (int): Number of labeled positive examples. Overrides labeled_ratio if provided.
-        labeled_ratio (float): Ratio of positive examples to sample as labeled.
-        val_ratio (float): Validation set ratio from original training data.
-        selection_strategy (str): Strategy for selecting labeled positive examples ('random', 'all', 'pusb').
-        scenario (str): PU learning scenario ('single', 'case-control').
-        random_seed (int): Random seed for reproducibility.
-        true_positive_label (int): True label value for positive examples (for evaluation).
-        true_negative_label (int): True label value for negative examples (for evaluation).
-        pu_labeled_label (int): PU training label value for labeled positive examples.
-        pu_unlabeled_label (int): PU training label value for unlabeled samples.
-
-    Returns:
-        A tuple containing (train_dataset, validation_dataset, test_dataset) as PUDataset objects.
+    Validation set is split AFTER PU labeling so that it preserves the PU
+    structure (labeled positive vs. unlabeled), enabling realistic proxy-metric
+    based model selection.
     """
     np.random.seed(random_seed)
 
@@ -79,62 +65,61 @@ def load_mnist_pu(
     train_features, train_labels = _extract_and_process(train_set_raw)
     test_features, test_labels = _extract_and_process(test_set_raw)
 
-    # Split validation set
-    train_features, train_labels, val_features, val_labels = split_train_val(
-        train_features, train_labels, val_ratio, random_state=random_seed
-    )
-
     # Adjust test set prevalence if needed
     if target_prevalence is not None and target_prevalence > 0:
         test_features, test_labels = resample_by_prevalence(
             test_features, test_labels, target_prevalence, random_seed
         )
 
-    # Create PU training set
-    pu_train_features, pu_train_true_labels_01, train_labeled_mask = (
-        create_pu_training_set(
-            train_features,
-            train_labels,
-            n_labeled=n_labeled,
-            labeled_ratio=labeled_ratio,
-            selection_strategy=selection_strategy,
-            scenario=scenario,
-            with_replacement=with_replacement,
-            case_control_mode=case_control_mode,
-        )
+    # Create PU training set from ALL training data (before val split)
+    pu_features, pu_true_labels_01, labeled_mask = create_pu_training_set(
+        train_features,
+        train_labels,
+        n_labeled=n_labeled,
+        labeled_ratio=labeled_ratio,
+        selection_strategy=selection_strategy,
+        scenario=scenario,
+        with_replacement=with_replacement,
+        case_control_mode=case_control_mode,
     )
 
-    # Label formatting
-    # Map internal standard 0/1 labels to final format based on user-defined label values
+    # Split validation from PU data (AFTER PU labeling) to preserve PU structure
+    (
+        pu_train_features, pu_train_true_labels_01, train_labeled_mask,
+        pu_val_features, pu_val_true_labels_01, val_labeled_mask,
+    ) = split_pu_val(pu_features, pu_true_labels_01, labeled_mask, val_ratio, random_state=random_seed)
 
-    # Map 'true_labels'
-    final_pu_train_true_labels = np.full_like(
-        pu_train_true_labels_01, true_negative_label
-    )
-    final_pu_train_true_labels[pu_train_true_labels_01 == 1] = true_positive_label
-    final_val_labels = np.full_like(val_labels, true_negative_label)
-    final_val_labels[val_labels == 1] = true_positive_label
+    # --- Label formatting ---
+
+    # Train true_labels
+    final_train_true_labels = np.full_like(pu_train_true_labels_01, true_negative_label)
+    final_train_true_labels[pu_train_true_labels_01 == 1] = true_positive_label
+    # Train pu_labels
+    final_train_pu_labels = np.full(len(pu_train_true_labels_01), pu_unlabeled_label, dtype=int)
+    final_train_pu_labels[train_labeled_mask == 1] = pu_labeled_label
+
+    # Val true_labels
+    final_val_true_labels = np.full_like(pu_val_true_labels_01, true_negative_label)
+    final_val_true_labels[pu_val_true_labels_01 == 1] = true_positive_label
+    # Val pu_labels (PU structure preserved!)
+    final_val_pu_labels = np.full(len(pu_val_true_labels_01), pu_unlabeled_label, dtype=int)
+    final_val_pu_labels[val_labeled_mask == 1] = pu_labeled_label
+
+    # Test true_labels
     final_test_labels = np.full_like(test_labels, true_negative_label)
     final_test_labels[test_labels == 1] = true_positive_label
-
-    # Map 'pu_labels' for training set
-    final_pu_train_labels = np.full(
-        len(pu_train_true_labels_01), pu_unlabeled_label, dtype=int
-    )
-    final_pu_train_labels[train_labeled_mask == 1] = pu_labeled_label
 
     # Create PUDataset instances
     train_dataset = PUDataset(
         features=pu_train_features,
-        pu_labels=final_pu_train_labels,
-        true_labels=final_pu_train_true_labels,
+        pu_labels=final_train_pu_labels,
+        true_labels=final_train_true_labels,
     )
 
-    # For validation/test sets, pu_labels and true_labels are consistent (both reflect ground truth)
     val_dataset = PUDataset(
-        features=val_features,
-        pu_labels=final_val_labels,
-        true_labels=final_val_labels,
+        features=pu_val_features,
+        pu_labels=final_val_pu_labels,
+        true_labels=final_val_true_labels,
     )
 
     test_dataset = PUDataset(

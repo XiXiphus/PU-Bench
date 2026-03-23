@@ -44,7 +44,7 @@ pulcpbf:
   checkpoint:
     enabled: true
     save_dir: checkpoints
-    monitor: val_f1
+    monitor: "val_proxy_acc"
     mode: max
     save_model: false
     verbose: true

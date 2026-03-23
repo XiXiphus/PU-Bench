@@ -38,7 +38,7 @@ pulda:
   checkpoint:
     save_model: false
     enabled: true
-    monitor: "val_f1"
+    monitor: "val_proxy_acc"
     mode: "max"
     early_stopping:
       enabled: true

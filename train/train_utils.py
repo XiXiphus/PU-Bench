@@ -5,12 +5,13 @@ model selection, metric evaluation, seeding, and helper
 utilities used by various PU-learning methods.
 
 Main functions:
-    - prepare_loaders:  Return train/val/test DataLoaders with class prior π,
-                        plus an optional non-shuffled update_loader.
-    - select_model:     Instantiate the model that matches the method/dataset.
-    - evaluate_metrics: Evaluate on a DataLoader and return a metrics dict
-                        (PU risk, error, accuracy, precision, recall, F1).
-    - set_global_seed:  Set global random seeds for reproducibility.
+    - prepare_loaders:          Return train/val/test DataLoaders with class prior π.
+    - select_model:             Instantiate the model that matches the method/dataset.
+    - evaluate_metrics:         Oracle metrics (true labels): accuracy, precision,
+                                recall, F1, AUC — prefixed with ``oracle_``.
+    - evaluate_proxy_metrics:   Proxy metrics (PU labels only): PA and PAUC —
+                                prefixed with ``proxy_``.
+    - set_global_seed:          Set global random seeds for reproducibility.
 
 """
 
@@ -171,16 +172,14 @@ def prepare_loaders(
                 random_state=data_config.get("seed", 42),
             )
 
-            # Create a validation dataset (use clean labels for convenience)
+            # Create a validation dataset preserving PU structure
             # Use local, contiguous indices for the split datasets to ensure
             # downstream modules (e.g., LaGAM feature writing and clustering)
             # can safely index tensors sized to the split length.
             _val_len = len(val_indices)
             val_dataset = PUDataset(
                 features=train_dataset.features[val_indices],
-                pu_labels=train_dataset.true_labels[
-                    val_indices
-                ],  # reuse true labels for PU labels in val
+                pu_labels=train_dataset.pu_labels[val_indices],
                 true_labels=train_dataset.true_labels[val_indices],
                 indices=torch.arange(_val_len),
                 pseudo_labels=train_dataset.pseudo_labels[val_indices],
@@ -387,7 +386,67 @@ def select_model(method: str, params: dict, prior: float):
     )
 
 
-_zero_one_loss = lambda x: (torch.sign(-x) + 1) / 2
+def _adapt_input_for_model(m: nn.Module, x: torch.Tensor) -> torch.Tensor:
+    """Adapt input tensor to match the model's expected channels and spatial size."""
+    if not (isinstance(x, torch.Tensor) and x.dim() == 4):
+        return x
+    exp_c = None
+    for mod in m.modules():
+        if isinstance(mod, nn.Conv2d):
+            exp_c = int(mod.in_channels)
+            break
+    if exp_c is None:
+        return x
+    in_c = x.size(1)
+    out = x
+    if exp_c == 3 and in_c == 1:
+        out = out.repeat(1, 3, 1, 1)
+    elif exp_c == 1 and in_c == 3:
+        out = out[:, 0:1, ...]
+    h, w = out.size(2), out.size(3)
+    target_size = None
+    if hasattr(m, "expected_image_size"):
+        try:
+            sz = getattr(m, "expected_image_size")
+            if isinstance(sz, (tuple, list)) and len(sz) == 2:
+                target_size = (int(sz[0]), int(sz[1]))
+        except Exception:
+            target_size = None
+    if target_size is None:
+        if exp_c == 3:
+            target_size = (32, 32)
+        elif exp_c == 1:
+            target_size = (28, 28)
+    if target_size is not None and (h != target_size[0] or w != target_size[1]):
+        out = F.interpolate(
+            out, size=target_size, mode="bilinear", align_corners=False
+        )
+    return out
+
+
+def _model_predict(model: nn.Module, x: torch.Tensor, device: torch.device):
+    """Run model forward and return (preds_binary, positive_class_score).
+
+    Handles probability outputs, logit outputs, and multi-class outputs
+    in a unified way.
+    """
+    x = x.to(device)
+    x = _adapt_input_for_model(model, x)
+    outputs = model(x)
+
+    if outputs.dim() > 1 and outputs.shape[1] > 1:
+        preds_binary = torch.argmax(outputs, dim=1).long()
+        pos_score = outputs[:, 1]
+    else:
+        raw = outputs.view(-1)
+        if torch.all(raw >= 0) and torch.all(raw <= 1):
+            preds_binary = (raw >= 0.5).long()
+            pos_score = raw
+        else:
+            preds_binary = (raw > 0).long()
+            pos_score = torch.sigmoid(raw)
+
+    return preds_binary, pos_score
 
 
 def evaluate_metrics(
@@ -396,135 +455,37 @@ def evaluate_metrics(
     device: torch.device,
     prior: float,
 ) -> dict[str, float]:
-    """Evaluate a model on a PU-formatted DataLoader.
+    """Evaluate Oracle metrics (using true labels) on a PU-formatted DataLoader.
 
-    The evaluation computes:
-        - "risk":  Unbiased PU risk estimate based on a zero-one loss surrogate.
-                   Uses logits (log-odds) to keep the decision centered at 0.
-        - "error": 1 - accuracy.
-        - "accuracy", "precision", "recall", "f1": Standard classification metrics
-                   computed against true labels.
-
-    Notes:
-        * If the model outputs probabilities (in [0, 1]), we threshold at 0.5 for
-          binary predictions and convert to logits via logit(p) for risk.
-        * If the model outputs logits, we threshold at 0 and use raw logits for risk.
-        * For multi-class outputs (C>1), we reduce to argmax for predictions and
-          use the score of class 0 for the risk terms to maintain a single score.
+    Returns dict with keys: oracle_accuracy, oracle_precision, oracle_recall,
+    oracle_f1, oracle_auc.
     """
-    y_true_all, y_pred_all = [], []
-    y_scores_all = []
-    total_risk_sum = 0.0
-
-    # Helper: adapt input to model's expected channels/size (first Conv2d)
-    def _adapt_input_for_model(m: nn.Module, x: torch.Tensor) -> torch.Tensor:
-        if not (isinstance(x, torch.Tensor) and x.dim() == 4):
-            return x
-        exp_c = None
-        for mod in m.modules():
-            if isinstance(mod, nn.Conv2d):
-                exp_c = int(mod.in_channels)
-                break
-        if exp_c is None:
-            return x
-        in_c = x.size(1)
-        out = x
-        if exp_c == 3 and in_c == 1:
-            out = out.repeat(1, 3, 1, 1)
-        elif exp_c == 1 and in_c == 3:
-            out = out[:, 0:1, ...]
-        h, w = out.size(2), out.size(3)
-        # For different models, resample according to their explicitly declared expected input size;
-        # if not declared, use empirical size based on channel count (3->32x32, 1->28x28)
-        target_size = None
-        # Prioritize reading model declared expected_image_size attribute (including wrapped models like Mix models/method-specific models)
-        try:
-            model_for_query = m
-            # Some methods may attach actual backbone to submodules, can expand as needed here
-            # Currently directly read top-level expected_image_size
-        except Exception:
-            model_for_query = m
-        if hasattr(model_for_query, "expected_image_size"):
-            try:
-                sz = getattr(model_for_query, "expected_image_size")
-                if isinstance(sz, (tuple, list)) and len(sz) == 2:
-                    target_size = (int(sz[0]), int(sz[1]))
-            except Exception:
-                target_size = None
-        if target_size is None:
-            if exp_c == 3:
-                target_size = (32, 32)
-            elif exp_c == 1:
-                target_size = (28, 28)
-        if target_size is not None and (h != target_size[0] or w != target_size[1]):
-            out = F.interpolate(
-                out, size=target_size, mode="bilinear", align_corners=False
-            )
-        return out
+    y_true_all, y_pred_all, y_scores_all = [], [], []
 
     model.eval()
     with torch.no_grad():
-        for x, t, y_true, _, _ in loader:
-            # For methods providing multiple augmented views (e.g., weak/strong),
-            # use the first one during evaluation to keep consistency.
+        for x, _t, y_true, _, _ in loader:
             if isinstance(x, (list, tuple)):
                 x = x[0]
 
-            x = x.to(device)
-            x = _adapt_input_for_model(model, x)
-            t, y_true = t.to(device), y_true.to(device)
-            outputs = model(x)
-
-            # (1) Convert model outputs to binary predictions; handle both
-            #     probability and logit forms in a unified way.
-            if outputs.dim() > 1 and outputs.shape[1] > 1:
-                # Multi-class: argmax for predictions; pick class-0 score for risk
-                preds_binary = torch.argmax(outputs, dim=1).long()
-                eval_scores = outputs[:, 0]
-            else:
-                raw = outputs.view(-1)
-                # If it looks like probabilities (bounded in [0, 1]), threshold at 0.5
-                # and convert to logits for risk computation.
-                if torch.all(raw >= 0) and torch.all(raw <= 1):
-                    preds_binary = (raw >= 0.5).long()
-                    eval_scores = torch.logit(torch.clamp(raw, 1e-6, 1 - 1e-6))
-                else:
-                    # Treat as logits (log-odds)
-                    preds_binary = (raw > 0).long()
-                    eval_scores = raw
+            preds_binary, pos_score = _model_predict(model, x, device)
 
             y_pred_all.extend(preds_binary.cpu().numpy())
-            y_true_all.extend(y_true.cpu().numpy())
-            y_scores_all.extend(eval_scores.detach().cpu().numpy())
-
-            # (2) Unbiased PU risk (zero-one surrogate) using labeled-positive (t=+1)
-            #     and unlabeled (t=-1) partitions.
-            pos_mask, unl_mask = (t == 1), (t == -1)
-            risk_pos_term = _zero_one_loss(eval_scores[pos_mask]).sum()
-            risk_neg_term = _zero_one_loss(-eval_scores[pos_mask]).sum()
-            risk_unl_term = _zero_one_loss(-eval_scores[unl_mask]).sum()
-
-            batch_risk = prior * (risk_pos_term - risk_neg_term) + risk_unl_term
-            total_risk_sum += batch_risk.item()
-
-    num_samples = len(y_true_all)
-    risk = total_risk_sum / max(1, num_samples)
+            y_true_all.extend(y_true.to(device).cpu().numpy())
+            y_scores_all.extend(pos_score.detach().cpu().numpy())
 
     y_true_arr = np.array(y_true_all)
     y_pred_arr = np.array(y_pred_all)
     y_score_arr = np.array(y_scores_all)
 
-    # Prior-calibrated fallback: if predictions collapse to a single class
-    # (e.g., all-positive due to biased logits), recalibrate the decision
-    # threshold so that the predicted positive fraction matches the training prior π.
+    # Prior-calibrated fallback: if predictions collapse to a single class,
+    # recalibrate threshold so predicted positive fraction matches prior.
     try:
-        unique_preds = np.unique(y_pred_arr)
-        if unique_preds.size == 1:
+        if np.unique(y_pred_arr).size == 1:
             n = len(y_score_arr)
             k = int(round(float(prior) * float(n)))
             if 0 < k < n:
                 sorted_scores = np.sort(y_score_arr)
-                # Threshold between the k-th and (k+1)-th from the top (tie-safe)
                 thr = (sorted_scores[n - k] + sorted_scores[n - k - 1]) / 2.0
                 y_pred_arr = (y_score_arr >= thr).astype(int)
     except Exception:
@@ -535,7 +496,6 @@ def evaluate_metrics(
     rec = recall_score(y_true_arr, y_pred_arr, pos_label=1, zero_division=0)
     f1 = f1_score(y_true_arr, y_pred_arr, pos_label=1, zero_division=0)
 
-    # AUC (robust to single-class batches)
     try:
         if len(np.unique(y_true_arr)) < 2:
             auc = float("nan")
@@ -545,13 +505,89 @@ def evaluate_metrics(
         auc = float("nan")
 
     return {
-        "error": 1 - acc,
-        "risk": risk,
-        "accuracy": acc,
-        "precision": prec,
-        "recall": rec,
-        "f1": f1,
-        "auc": auc,
+        "oracle_accuracy": acc,
+        "oracle_precision": prec,
+        "oracle_recall": rec,
+        "oracle_f1": f1,
+        "oracle_auc": auc,
+    }
+
+
+def evaluate_proxy_metrics(
+    model: nn.Module,
+    loader: DataLoader,
+    device: torch.device,
+    prior: float,
+    scenario: str = "single",
+) -> dict[str, float]:
+    """Compute Proxy Accuracy (PA) and Proxy AUC (PAUC) using PU labels only.
+
+    PA and PAUC are model-selection metrics that do not require true labels,
+    following the definitions in Wang et al. (ICLR 2026).
+
+    P samples are identified by pu_label == 1 (labeled positive).
+    U samples are identified by pu_label != 1 (unlabeled).
+
+    Args:
+        scenario: 'single' for one-sample (OS) PA formula,
+                  'case-control' for two-sample (TS) PA formula.
+    """
+    correct_p, correct_u, total_p, total_u = 0, 0, 0, 0
+    scores_p: list[float] = []
+    scores_u: list[float] = []
+
+    model.eval()
+    with torch.no_grad():
+        for x, t, _, _, _ in loader:
+            if isinstance(x, (list, tuple)):
+                x = x[0]
+
+            preds_binary, pos_score = _model_predict(model, x, device)
+            t = t.to(device)
+
+            p_mask = (t == 1)
+            u_mask = (t != 1)
+
+            # PA: P predicted as positive is correct; U predicted as negative is correct
+            if p_mask.any():
+                correct_p += preds_binary[p_mask].eq(1).sum().item()
+                total_p += p_mask.sum().item()
+                scores_p.extend(pos_score[p_mask].cpu().numpy().tolist())
+
+            if u_mask.any():
+                correct_u += preds_binary[u_mask].eq(0).sum().item()
+                total_u += u_mask.sum().item()
+                scores_u.extend(pos_score[u_mask].cpu().numpy().tolist())
+
+    # PA formula (Definition 1, Wang et al.)
+    if total_p == 0 or total_u == 0:
+        pa = float("nan")
+    elif scenario == "case-control":
+        # Two-sample (TS): 2π·(correct_p/total_p) + correct_u/total_u
+        pa = 2 * prior * (correct_p / total_p) + (correct_u / total_u)
+    else:
+        # One-sample (OS): 2π·(correct_p/total_p) + (correct_p+correct_u)/(total_p+total_u)
+        pa = (
+            2 * prior * (correct_p / total_p)
+            + (correct_p + correct_u) / (total_p + total_u)
+        )
+
+    # PAUC (Definition 2, Wang et al.)
+    if len(scores_p) == 0 or len(scores_u) == 0:
+        pauc = float("nan")
+    else:
+        try:
+            labels = np.concatenate(
+                [np.ones(len(scores_p)), np.zeros(len(scores_u))]
+            )
+            scores = np.array(scores_p + scores_u)
+            pauc = float(roc_auc_score(labels, scores))
+        except ValueError:
+            pauc = 0.5
+
+    return {
+        "proxy_acc": pa,
+        "proxy_auc": pauc,
     }
 
 
@@ -865,29 +901,32 @@ class ModelCheckpoint:
         )
         table.add_column("Metric", style="cyan", no_wrap=True)
         table.add_column("Train", style="magenta")
+        table.add_column("Val", style="yellow")
         table.add_column("Test", style="green")
 
-        train_metrics = {
-            k.replace("train_", ""): v
-            for k, v in self.best_metrics.items()
-            if k.startswith("train_")
-        }
-        test_metrics = {
-            k.replace("test_", ""): v
-            for k, v in self.best_metrics.items()
-            if k.startswith("test_")
-        }
+        def _extract(prefix):
+            return {
+                k[len(prefix):]: v
+                for k, v in self.best_metrics.items()
+                if k.startswith(prefix)
+            }
 
-        metric_keys = sorted(list(set(train_metrics.keys()) | set(test_metrics.keys())))
+        train_m = _extract("train_")
+        val_m = _extract("val_")
+        test_m = _extract("test_")
 
-        for key in metric_keys:
-            train_val = train_metrics.get(key)
-            test_val = test_metrics.get(key)
-            table.add_row(
-                key,
-                f"{train_val:.4f}" if train_val is not None else "N/A",
-                f"{test_val:.4f}" if test_val is not None else "N/A",
-            )
+        all_keys = sorted(set(train_m.keys()) | set(val_m.keys()) | set(test_m.keys()))
+
+        def _fmt(d, key):
+            v = d.get(key)
+            if v is None:
+                return "N/A"
+            if isinstance(v, float) and v != v:  # nan check
+                return "NaN"
+            return f"{v:.4f}"
+
+        for key in all_keys:
+            table.add_row(key, _fmt(train_m, key), _fmt(val_m, key), _fmt(test_m, key))
 
         console.print(table)
         if self.file_console:

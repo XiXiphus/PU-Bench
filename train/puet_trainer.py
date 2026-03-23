@@ -113,11 +113,11 @@ class PUETTrainer:
             auc = None
 
         metrics = {
-            "accuracy": acc,
-            "f1": f1,
-            "precision": prec,
-            "recall": rec,
-            "auc": auc,
+            "oracle_accuracy": acc,
+            "oracle_f1": f1,
+            "oracle_precision": prec,
+            "oracle_recall": rec,
+            "oracle_auc": auc,
         }
 
         # 5. Log results and integrate checkpoint-like improvement logging
@@ -128,7 +128,7 @@ class PUETTrainer:
         if ckpt_cfg and ckpt_cfg.get("enabled", False):
             save_dir = ckpt_cfg.get("save_dir", "checkpoints")
             filename = f"{self.method}_{self.experiment_name}.pth"
-            monitor = ckpt_cfg.get("monitor", "test_f1")
+            monitor = ckpt_cfg.get("monitor", "test_oracle_f1")
             mode = ckpt_cfg.get("mode", "max")
             ckpt = ModelCheckpoint(
                 save_dir=save_dir,
@@ -233,7 +233,7 @@ class PUETTrainer:
                     "epoch": 1,
                     "metrics": {f"test_{k}": v for k, v in metrics.items()},
                 },
-                "monitor": self.params.get("checkpoint", {}).get("monitor", "test_f1"),
+                "monitor": self.params.get("checkpoint", {}).get("monitor", "test_oracle_f1"),
                 "global_epochs": 1,
                 "hyperparameters": self.params,
             }
