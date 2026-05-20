@@ -194,6 +194,8 @@ class CNN_AlzheimerMRI(LeNet):
 class HolisticPU_CNN_CIFAR10(CNN_CIFAR10):
     """Specialized model for HolisticPU, outputs 2D logits to work with cross-entropy loss."""
 
+    positive_logit_index = 0
+
     def __init__(self, prior: float = 0.0):
         super().__init__(prior)
         self.final_classifier = nn.Linear(1000, 2)
@@ -201,6 +203,8 @@ class HolisticPU_CNN_CIFAR10(CNN_CIFAR10):
 
 class HolisticPU_LeNet(LeNet):
     """Specialized LeNet model for HolisticPU, outputs 2D logits."""
+
+    positive_logit_index = 0
 
     def __init__(self, prior: float = 0.0):
         super().__init__(prior)
@@ -223,6 +227,8 @@ class HolisticPU_CNN_FashionMNIST(HolisticPU_LeNet):
 
 class HolisticPU_CNN_AlzheimerMRI(CNN_AlzheimerMRI):
     """Specialized model for HolisticPU on Alzheimer MRI, outputs 2D logits."""
+
+    positive_logit_index = 0
 
     def __init__(self, prior: float = 0.0):
         super().__init__(prior)
@@ -283,6 +289,8 @@ class MLP_20News(_DynamicMLP20News):
 
 
 class HolisticPU_MLP_20News(_DynamicMLP20News):
+    positive_logit_index = 0
+
     def __init__(self, prior: float = 0.0):
         super().__init__(out_dim=2, prior=prior)
 
@@ -293,6 +301,8 @@ class MLP_IMDB(_DynamicMLP20News):
 
 
 class HolisticPU_MLP_IMDB(_DynamicMLP20News):
+    positive_logit_index = 0
+
     def __init__(self, prior: float = 0.0):
         super().__init__(out_dim=2, prior=prior)
 

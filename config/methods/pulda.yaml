@@ -1,4 +1,9 @@
 pulda:
+  metadata:
+    method_key: "pulda"
+    trainer_key: "pulda"
+  # Source-aligned trainer with PU-Bench controlled public backbones.
+  # Official code: jiangyangby/PULDA @ 7b3dcad95bd7caa0a9477af37a05764fbe6e27bc.
   # Optimizer settings (alignment stage)
   optimizer: "adam"
   lr: 0.001 # Alignment stage learning rate
@@ -22,6 +27,7 @@ pulda:
   alpha_CN: 0.5 # EMA momentum for negative class margin loss
 
   # PULDA specific training schedule
+  warmup_loss: "lda" # Source default; set to "bce" only as an explicit benchmark convenience.
   warm_up_epochs: 60 # Original implementation
   pu_epochs: 60 # Original implementation
 
@@ -41,7 +47,7 @@ pulda:
     monitor: "val_proxy_acc"
     mode: "max"
     early_stopping:
-      enabled: true
+      enabled: false # Source schedule runs fixed warm_up_epochs + pu_epochs.
       patience: 20
       min_delta: 0.0001
 

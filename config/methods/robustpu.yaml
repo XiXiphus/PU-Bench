@@ -1,7 +1,17 @@
 robustpu:
+  metadata:
+    method_key: "robustpu"
+    trainer_key: "robustpu"
+  # Main-table policy: source-aligned RobustPU trainer on PU-Bench's controlled
+  # public backbones. This is not the paper/source private-backbone recipe.
+  backbone_policy: "controlled"
+  # Optional private source-like backbones live in train/robustpu/models.py.
+  # Use only for explicitly named private-backbone ablations.
+  private_backbone_arch: "auto"
   batch_size: 256
   seed: 42
   optimizer: "adam"
+  init_bias_from_prior: false
   label_scheme:
     true_positive_label: 1
     true_negative_label: 0
@@ -32,7 +42,8 @@ robustpu:
     batch_size: 256
     loss: "bce"
     hardness: "logistic"
-    spl_type: "linear"
+    # Robust-PU paper Eq. (3) and source default use SPL-IR-Welsch.
+    spl_type: "welsch"
     scheduler_p:
       type: "linear"
       alpha: 0.1

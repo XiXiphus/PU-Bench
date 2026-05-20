@@ -1,4 +1,7 @@
 vaepu:
+  metadata:
+    method_key: "vaepu"
+    trainer_key: "vaepu"
   # Basic settings - these parameters are common to all datasets
   seed: 42
 
@@ -11,11 +14,15 @@ vaepu:
     save_model: false
     monitor: "val_proxy_acc"
     early_stopping:
-      enabled: true
+      enabled: false
       patience: 30
       min_delta: 0.0001
+
+  # MNIST follows the author-code recipe: flat MLP VAE/PN, fixed sign threshold.
+  mnist_source_recipe: true
+  pn_decision_threshold: 0.0
 
   # Optional manual override parameters - if these parameters are set, they will override adaptive selection
   # Leave empty to use adaptive configuration
   manual_override:
-    threshold_selection: "youden"
+    threshold_selection: "fixed"

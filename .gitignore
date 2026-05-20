@@ -57,6 +57,7 @@ checkpoints/
 runs/
 outputs/
 *.pth
+scripts/embeddings/
 
 # Ignore root-level JSON files (often experiment summaries), but keep config JSONs if any
 *.json

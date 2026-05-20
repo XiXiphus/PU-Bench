@@ -1,7 +1,6 @@
 # NOTE:
 # Dependencies are intentionally unpinned. Installing latest stable versions is expected to work in normal cases.
 # For exact reproducibility, create and share a locked file (e.g., `pip freeze > requirements.lock.txt`).
-faiss-cpu
 torch
 torchvision
 numpy
@@ -15,11 +14,11 @@ jenkspy
 dill
 pillow
 datasets
+liac-arff
 pyarrow
 tabulate
 matplotlib
 joblib
 seaborn
 sentence-transformers
-torchtext
 transformers

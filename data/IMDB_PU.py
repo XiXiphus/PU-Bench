@@ -5,17 +5,14 @@ import numpy as np
 
 from .data_utils import (
     PUDataset,
-    split_pu_val,
-    create_pu_training_set,
-    print_dataset_statistics,
-    resample_by_prevalence,
+    build_pu_datasets_from_binary_arrays,
 )
 
 
 def _load_imdb_texts_via_hf(
     root_dir: str,
 ) -> tuple[list[str], list[int], list[str], list[int]]:
-    """Load IMDB using HuggingFace datasets. This avoids torchtext binary deps.
+    """Load IMDB using HuggingFace datasets. This avoids legacy text-loader binary dependencies.
 
     Downloads to cache_dir under the provided root_dir to keep project-contained.
     """
@@ -34,27 +31,6 @@ def _load_imdb_texts_via_hf(
     test_texts = list(ds["test"]["text"])  # type: ignore
     test_labels = [int(x) for x in ds["test"]["label"]]  # type: ignore
 
-    return train_texts, train_labels, test_texts, test_labels
-
-
-def _load_imdb_texts_via_torchtext(
-    root_dir: str,
-) -> tuple[list[str], list[int], list[str], list[int]]:
-    # torchtext 0.14+ API
-    from torchtext.datasets import IMDB
-
-    train_iter = IMDB(root=root_dir, split="train")
-    test_iter = IMDB(root=root_dir, split="test")
-
-    def _to_lists(it):
-        texts, labels = [], []
-        for label, text in it:
-            texts.append(text)
-            labels.append(1 if str(label).lower().strip() == "pos" else 0)
-        return texts, labels
-
-    train_texts, train_labels = _to_lists(train_iter)
-    test_texts, test_labels = _to_lists(test_iter)
     return train_texts, train_labels, test_texts, test_labels
 
 
@@ -138,7 +114,7 @@ def load_imdb_pu(
     pu_labeled_label: int = 1,
     pu_unlabeled_label: int = -1,
     with_replacement: bool = True,
-    print_stats: bool = True,
+    print_stats: bool = False,
     dataset_log_file: str | None = None,
     # SBERT settings
     sbert_model_name: str = "all-MiniLM-L6-v2",
@@ -148,23 +124,20 @@ def load_imdb_pu(
     """
     Load and preprocess IMDB dataset for PU learning.
 
-    Validation set is split AFTER PU labeling so that it preserves the PU
-    structure (labeled positive vs. unlabeled), enabling realistic proxy-metric
-    based model selection.
+    The shared PU builder performs source-level train/validation splitting
+    before PU sampling, then constructs PU labels and audit metadata.
     """
-    rng = np.random.RandomState(random_seed)
-
     # 1) Load raw texts and labels
-    # Priority: local folder → local tar.gz → HuggingFace → torchtext
+    # Priority: local folder → local tar.gz → HuggingFace → Stanford archive.
     train_texts: list[str]
     train_labels: list[int]
     test_texts: list[str]
     test_labels: list[int]
-    
+
     # Check if local data exists first
     local_aclimdb_path = os.path.join(data_dir, "aclImdb")
     local_tar_path = os.path.join(data_dir, "aclImdb_v1.tar.gz")
-    
+
     if os.path.isdir(local_aclimdb_path) and os.path.exists(os.path.join(local_aclimdb_path, "train", "pos")):
         # Use local extracted data
         print(f"Using local IMDB data from {local_aclimdb_path}")
@@ -205,10 +178,10 @@ def load_imdb_pu(
         # Auto-compute and save embeddings if not found
         print(f"⚠️  Precomputed embeddings not found at {sbert_embeddings_path}")
         print("   Auto-computing embeddings...")
-        
+
         try:
             from sentence_transformers import SentenceTransformer
-            
+
             # Use local model or download
             if sbert_model_path and os.path.isdir(sbert_model_path):
                 model = SentenceTransformer(sbert_model_path)
@@ -217,7 +190,7 @@ def load_imdb_pu(
                 model_name = sbert_model_name.replace("sentence-transformers/", "")
                 print(f"   Using model: {model_name}")
                 model = SentenceTransformer(model_name)
-            
+
             # Compute embeddings
             print("   Computing train embeddings...")
             X_train = model.encode(
@@ -227,7 +200,7 @@ def load_imdb_pu(
             X_test = model.encode(
                 test_texts, batch_size=256, show_progress_bar=True, convert_to_numpy=True
             ).astype(np.float32)
-            
+
             # Save for future use
             if sbert_embeddings_path:
                 print(f"   Saving embeddings to {sbert_embeddings_path}...")
@@ -242,7 +215,7 @@ def load_imdb_pu(
                 print("   ✅ Embeddings saved!")
             else:
                 print("   ⚠️  No sbert_embeddings_path specified; skipping save.")
-            
+
         except ImportError:
             raise ImportError(
                 "sentence-transformers not installed. Please run: pip install sentence-transformers"
@@ -261,83 +234,27 @@ def load_imdb_pu(
     y_train_bin = np.array(train_labels, dtype=int)
     y_test_bin = np.array(test_labels, dtype=int)
 
-    if target_prevalence is not None and target_prevalence > 0:
-        X_test, y_test_bin = resample_by_prevalence(
-            X_test, y_test_bin, target_prevalence, random_seed
-        )
-
-    # Create PU training set from ALL training data (before val split)
-    pu_features, pu_true_labels_01, labeled_mask = create_pu_training_set(
+    return build_pu_datasets_from_binary_arrays(
         X_train,
         y_train_bin,
+        X_test,
+        y_test_bin,
+        positive_classes=["pos"],
+        negative_classes=["neg"],
         n_labeled=n_labeled,
         labeled_ratio=labeled_ratio,
+        val_ratio=val_ratio,
+        target_prevalence=target_prevalence,
         selection_strategy=selection_strategy,
         scenario=scenario,
-        with_replacement=with_replacement,
         case_control_mode=case_control_mode,
-    )
-
-    # Split validation from PU data (AFTER PU labeling) to preserve PU structure
-    (
-        pu_train_features, pu_train_true_labels_01, train_labeled_mask,
-        pu_val_features, pu_val_true_labels_01, val_labeled_mask,
-    ) = split_pu_val(pu_features, pu_true_labels_01, labeled_mask, val_ratio, random_state=random_seed)
-
-    # --- Label formatting ---
-
-    # Train true_labels
-    final_pu_train_true_labels = np.full_like(
-        pu_train_true_labels_01, true_negative_label
-    )
-    final_pu_train_true_labels[pu_train_true_labels_01 == 1] = true_positive_label
-    # Train pu_labels
-    final_pu_train_labels = np.full(
-        len(pu_train_true_labels_01), pu_unlabeled_label, dtype=int
-    )
-    final_pu_train_labels[train_labeled_mask == 1] = pu_labeled_label
-
-    # Val true_labels (for Oracle metrics)
-    final_val_true_labels = np.full_like(pu_val_true_labels_01, true_negative_label)
-    final_val_true_labels[pu_val_true_labels_01 == 1] = true_positive_label
-    # Val pu_labels (PU structure preserved!)
-    final_val_pu_labels = np.full(len(pu_val_true_labels_01), pu_unlabeled_label, dtype=int)
-    final_val_pu_labels[val_labeled_mask == 1] = pu_labeled_label
-
-    # Test true_labels
-    final_test_labels = np.full_like(y_test_bin, true_negative_label)
-    final_test_labels[y_test_bin == 1] = true_positive_label
-
-    train_dataset = PUDataset(
-        features=pu_train_features,
-        pu_labels=final_pu_train_labels,
-        true_labels=final_pu_train_true_labels,
-    )
-    val_dataset = PUDataset(
-        features=pu_val_features,
-        pu_labels=final_val_pu_labels,
-        true_labels=final_val_true_labels,
-    )
-    test_dataset = PUDataset(
-        features=X_test,
-        pu_labels=final_test_labels,
-        true_labels=final_test_labels,
-    )
-
-    print_dataset_statistics(
-        train_dataset,
-        val_dataset,
-        test_dataset,
-        train_labeled_mask,
-        positive_classes=[],
-        negative_classes=[],
+        random_seed=random_seed,
         true_positive_label=true_positive_label,
         true_negative_label=true_negative_label,
         pu_labeled_label=pu_labeled_label,
         pu_unlabeled_label=pu_unlabeled_label,
-        val_ratio=val_ratio,
-        log_file=dataset_log_file,
-        also_print=print_stats,
+        with_replacement=with_replacement,
+        print_stats=print_stats,
+        dataset_log_file=dataset_log_file,
+        dataset_name="IMDB",
     )
-
-    return train_dataset, val_dataset, test_dataset

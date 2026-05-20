@@ -6,10 +6,7 @@ from sklearn.datasets import fetch_20newsgroups
 
 from .data_utils import (
     PUDataset,
-    split_pu_val,
-    create_pu_training_set,
-    print_dataset_statistics,
-    resample_by_prevalence,
+    build_pu_datasets_from_binary_arrays,
 )
 
 
@@ -32,7 +29,7 @@ def load_20news_pu(
     pu_labeled_label: int = 1,
     pu_unlabeled_label: int = -1,
     with_replacement: bool = True,
-    print_stats: bool = True,
+    print_stats: bool = False,
     dataset_log_file: str | None = None,
     # SBERT settings
     sbert_model_name: str = "all-MiniLM-L6-v2",
@@ -44,9 +41,8 @@ def load_20news_pu(
     """
     Load and preprocess 20 Newsgroups dataset for PU learning.
 
-    Validation set is split AFTER PU labeling so that it preserves the PU
-    structure (labeled positive vs. unlabeled), enabling realistic proxy-metric
-    based model selection.
+    The shared PU builder performs source-level train/validation splitting
+    before PU sampling, then constructs PU labels and audit metadata.
 
     Positive class (P): categories whose prefix is in {'alt', 'comp', 'misc', 'rec'}
     Negative class (N): categories whose prefix is in {'sci', 'soc', 'talk'}
@@ -56,8 +52,6 @@ def load_20news_pu(
     Returns:
         (train_dataset, val_dataset, test_dataset) as PUDataset objects
     """
-    rng = np.random.RandomState(random_seed)
-
     pos_prefixes = set((positive_classes or ["alt", "comp", "misc", "rec"]))
     neg_prefixes = set((negative_classes or ["sci", "soc", "talk"]))
 
@@ -167,98 +161,27 @@ def load_20news_pu(
     X_train = _l2_normalize(X_train)
     X_test = _l2_normalize(X_test)
 
-    # Optional test prevalence adjustment
-    if target_prevalence is not None and target_prevalence > 0:
-        X_test, y_test_bin = resample_by_prevalence(
-            X_test, y_test_bin, target_prevalence, random_seed
-        )
-
-    # Create PU training set from ALL training data (before val split)
-    pu_features, pu_true_labels_01, labeled_mask = create_pu_training_set(
+    return build_pu_datasets_from_binary_arrays(
         X_train,
         y_train_bin,
+        X_test,
+        y_test_bin,
+        positive_classes=sorted(pos_prefixes),
+        negative_classes=sorted(neg_prefixes),
         n_labeled=n_labeled,
         labeled_ratio=labeled_ratio,
+        val_ratio=val_ratio,
+        target_prevalence=target_prevalence,
         selection_strategy=selection_strategy,
         scenario=scenario,
-        with_replacement=with_replacement,
         case_control_mode=case_control_mode,
-    )
-
-    # Split validation from PU data (AFTER PU labeling) to preserve PU structure
-    (
-        pu_train_features,
-        pu_train_true_labels_01,
-        train_labeled_mask,
-        pu_val_features,
-        pu_val_true_labels_01,
-        val_labeled_mask,
-    ) = split_pu_val(
-        pu_features,
-        pu_true_labels_01,
-        labeled_mask,
-        val_ratio,
-        random_state=random_seed,
-    )
-
-    # --- Label formatting ---
-
-    # Train true_labels
-    final_pu_train_true_labels = np.full_like(
-        pu_train_true_labels_01, true_negative_label
-    )
-    final_pu_train_true_labels[pu_train_true_labels_01 == 1] = true_positive_label
-    # Train pu_labels
-    final_pu_train_labels = np.full(
-        len(pu_train_true_labels_01), pu_unlabeled_label, dtype=int
-    )
-    final_pu_train_labels[train_labeled_mask == 1] = pu_labeled_label
-
-    # Val true_labels (for Oracle metrics)
-    final_val_true_labels = np.full_like(pu_val_true_labels_01, true_negative_label)
-    final_val_true_labels[pu_val_true_labels_01 == 1] = true_positive_label
-    # Val pu_labels (PU structure preserved!)
-    final_val_pu_labels = np.full(
-        len(pu_val_true_labels_01), pu_unlabeled_label, dtype=int
-    )
-    final_val_pu_labels[val_labeled_mask == 1] = pu_labeled_label
-
-    # Test true_labels
-    final_test_labels = np.full_like(y_test_bin, true_negative_label)
-    final_test_labels[y_test_bin == 1] = true_positive_label
-
-    # Build datasets
-    train_dataset = PUDataset(
-        features=pu_train_features,
-        pu_labels=final_pu_train_labels,
-        true_labels=final_pu_train_true_labels,
-    )
-    val_dataset = PUDataset(
-        features=pu_val_features,
-        pu_labels=final_val_pu_labels,
-        true_labels=final_val_true_labels,
-    )
-    test_dataset = PUDataset(
-        features=X_test,
-        pu_labels=final_test_labels,
-        true_labels=final_test_labels,
-    )
-
-    # Stats logging
-    print_dataset_statistics(
-        train_dataset,
-        val_dataset,
-        test_dataset,
-        train_labeled_mask,
-        positive_classes=[],  # Not applicable for text; prefixes documented above
-        negative_classes=[],
+        random_seed=random_seed,
         true_positive_label=true_positive_label,
         true_negative_label=true_negative_label,
         pu_labeled_label=pu_labeled_label,
         pu_unlabeled_label=pu_unlabeled_label,
-        val_ratio=val_ratio,
-        log_file=dataset_log_file,
-        also_print=print_stats,
+        with_replacement=with_replacement,
+        print_stats=print_stats,
+        dataset_log_file=dataset_log_file,
+        dataset_name="20News",
     )
-
-    return train_dataset, val_dataset, test_dataset

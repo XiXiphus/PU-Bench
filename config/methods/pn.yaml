@@ -1,4 +1,7 @@
 pn:
+  metadata:
+    method_key: "pn"
+    trainer_key: "pn"
   optimizer: "adam"
   lr: 0.0005
   weight_decay: 0.00001

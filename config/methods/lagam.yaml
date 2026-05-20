@@ -1,4 +1,9 @@
 lagam:
+  metadata:
+    method_key: "lagam"
+    trainer_key: "lagam"
+  # Source estimator loop with LaGAM-private meta backbones and benchmark-adapted schedule.
+  # Official code: llong-cs/LaGAM @ 362a7f41fcf3d4e4161fe99f4aab4e6128b6a5d8.
   optimizer: "sgd"
   lr: 0.001
   weight_decay: 0.0001
@@ -36,6 +41,6 @@ lagam:
     monitor: "val_proxy_acc"
     mode: "max"
     early_stopping:
-      enabled: true
+      enabled: false # Source schedule has no early stopping.
       patience: 25
       min_delta: 0.0001

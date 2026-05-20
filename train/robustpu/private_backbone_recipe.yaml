@@ -1,0 +1,5 @@
+robustpu_private_backbone:
+  # Optional source-private capacity check.
+  # Do not mix this with the default controlled RobustPU result table.
+  backbone_policy: "private"
+  private_backbone_arch: "auto"  # auto | normalnn | cnn

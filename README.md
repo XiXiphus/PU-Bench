@@ -2,7 +2,7 @@
 
 A unified open-source benchmark for **Positive-Unlabeled (PU) learning**.
 
-PU-Bench provides a standardized framework for evaluating PU learning algorithms under consistent conditions, covering data generation, training, and evaluation in a single reproducible pipeline. It currently integrates **19 PU methods** plus a fully supervised **PN** oracle baseline across **9 datasets** spanning text, image, and tabular modalities.
+PU-Bench provides a standardized framework for evaluating PU learning algorithms under consistent conditions, covering data generation, training, and evaluation in a single reproducible pipeline. It currently integrates **18 PU methods** plus a fully supervised **PN** oracle baseline across **9 datasets** spanning text, image, and tabular modalities.
 
 > **Paper**: [PU-Bench: A Unified Benchmark for Rigorous and Reproducible PU Learning](https://openreview.com/forum?id=tb8DabMbMq) (ICLR 2026)
 >
@@ -47,7 +47,7 @@ cd PU-Bench
 pip install -r requirements.txt
 ```
 
-Key dependencies: PyTorch, torchvision, scikit-learn, sentence-transformers, pyyaml, rich, faiss-cpu.
+Key dependencies: PyTorch, torchvision, scikit-learn, sentence-transformers, pyyaml, rich.
 
 ---
 
@@ -95,6 +95,8 @@ python run_train.py \
   --methods nnpu vpu --dry-run
 ```
 
+Add `--plan-json /tmp/pu_bench_plan.json` to export the expanded run plan.
+
 By default, checkpointing and early stopping use `val_proxy_acc` on a PU-structured validation split. If you prefer AUC-oriented model selection, set `checkpoint.monitor: "val_proxy_auc"` in the corresponding method YAML.
 
 ---
@@ -115,6 +117,8 @@ PU-Bench/
 │   ├── datasets_vary_c/         # Varying label ratio c
 │   ├── datasets_vary_e/         # Varying labeling mechanism (SAR)
 │   ├── method_loader.py         # YAML loader for method configs
+│   ├── experiment_plan.py       # Explicit run planning and validation
+│   ├── schema_adapter.py        # Flat/namespaced config compatibility
 │   └── run_param_sweep.py       # Expands dataset config into run grid
 │
 ├── data/
@@ -124,23 +128,26 @@ PU-Bench/
 │   └── ...                      # One loader per dataset
 │
 ├── backbone/
-│   ├── models.py                # Standard CNN/MLP backbones
-│   ├── mix_models.py            # P3Mix-specific backbones
-│   ├── meta_models.py           # LaGAM meta-learning backbones
-│   ├── vaepu_models.py          # VAE-PU generative models
-│   ├── cgenpu_models.py         # CGenPU GAN models
-│   └── puet/                    # PU Extra Trees
-│
-├── loss/
-│   ├── loss_nnpu.py             # nnPU / uPU loss
-│   ├── loss_vpu.py              # VPU variational loss
-│   ├── loss_distpu.py           # Dist-PU distribution alignment loss
-│   └── ...                      # One file per loss function
+│   └── models.py                # Shared public CNN/MLP backbones
 │
 ├── train/
 │   ├── base_trainer.py          # Abstract base class for all methods
-│   ├── train_utils.py           # Evaluation, model selection, checkpointing
-│   ├── nnpu_trainer.py          # nnPU trainer implementation
+│   ├── data_factory.py          # PU DataLoader construction
+│   ├── model_factory.py         # Shared public backbone selection
+│   ├── metrics.py               # Oracle/proxy evaluation helpers
+│   ├── checkpointing.py         # Checkpoint and bundle helpers
+│   ├── registry.py              # Method-to-trainer dispatch table
+│   ├── common/                  # Shared PU risk/loss primitives
+│   ├── bbepu/                   # BBE-PU trainer, estimator, and method loss
+│   ├── cgenpu/                  # CGenPU trainer and private GAN models
+│   ├── distpu/                  # Dist-PU trainer, loss, mixup, pseudo labels
+│   ├── lbe/                     # LBE-PU EM trainer and source-aligned formulas
+│   ├── nnpu/                    # nnPU trainer and package-local loss exports
+│   ├── nnpusb/                  # nnPUSB trainer and source-mapped risk
+│   ├── p3mix/                   # P3Mix-C/E trainers and private mixup models
+│   ├── puet/                    # PU Extra Trees package
+│   ├── robustpu/                # Robust-PU trainer, SPL utilities, private models
+│   ├── vpu/                     # VPU trainer and variational loss
 │   └── ...                      # One trainer per method
 │
 └── results/                     # Auto-generated outputs
@@ -303,7 +310,7 @@ PU-Bench reports two metric families:
 
 | Category                                 | Methods                                                                                                                                    |
 | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Risk-Minimization Estimators**         | uPU (upu), nnPU, PUSB (nnpusb), VPU, MPE-PU (bbepu), LBE-PU (lbe), PUET, Dist-PU (distpu), PULDA                                           |
+| **Risk-Minimization Estimators**         | nnPU, PUSB (nnpusb), VPU, MPE-PU (bbepu), LBE-PU (lbe), PUET, Dist-PU (distpu), PULDA                                                      |
 | **Disambiguation-Guided Supervised ERM** | Self-PU (selfpu), P3Mix-C (p3mixc), P3Mix-E (p3mixe), Robust-PU (robustpu), Holistic-PU (holisticpu), LaGAM-PU (lagam), PUL-CPBF (pulcpbf) |
 | **Generative Distribution Matching**     | VAE-PU (vaepu), PAN (pan), CGenPU (cgenpu)                                                                                                 |
 
@@ -366,12 +373,12 @@ mymethod:
       min_delta: 0.0001
 ```
 
-**Step 2: Implement the Trainer** — `train/mymethod_trainer.py`
+**Step 2: Implement the Trainer** — `train/mymethod/trainer.py`
 
 ```python
-"""mymethod_trainer.py"""
+"""train/mymethod/trainer.py"""
 import torch
-from .base_trainer import BaseTrainer
+from ..base_trainer import BaseTrainer
 
 
 class MyMethodTrainer(BaseTrainer):
@@ -399,10 +406,10 @@ class MyMethodTrainer(BaseTrainer):
             self.optimizer.step()
 ```
 
-**Step 3: (Optional) Create a custom loss** — `loss/loss_mymethod.py`
+**Step 3: (Optional) Create a method-local loss** — `train/mymethod/losses.py`
 
 ```python
-"""loss_mymethod.py"""
+"""train/mymethod/losses.py"""
 import torch
 import torch.nn as nn
 
@@ -422,22 +429,22 @@ class MyCustomLoss(nn.Module):
         return loss
 ```
 
-**Step 4: Register in `run_train.py`**
+**Step 4: Register in `train/registry.py`**
 
 Add one line to the `TRAINER_IMPORT_PATHS` dictionary:
 
 ```python
 TRAINER_IMPORT_PATHS = {
     # ... existing methods ...
-    "mymethod": "train.mymethod_trainer.MyMethodTrainer",
+    "mymethod": "train.mymethod.trainer.MyMethodTrainer",
 }
 ```
 
 **Step 5: Run it**
 
 ```bash
-python run_train.py \
-  --dataset-config config/datasets_typical/param_sweep_cifar10.yaml \
+uv run python -u run_train.py \
+  --dataset-config config/datasets_smoke/param_sweep_mnist_seed2.yaml \
   --methods mymethod
 ```
 
@@ -544,9 +551,9 @@ def load_mydataset_pu(config: dict):
     return train_ds, val_ds, test_ds
 ```
 
-**Step 2: Register in `train/train_utils.py`**
+**Step 2: Register in the training factories**
 
-In the `prepare_loaders()` function, add a branch for your dataset:
+In `train/data_factory.py`, add a `prepare_loaders()` branch for your dataset:
 
 ```python
 if dataset_class == "MyDataset":
@@ -554,7 +561,8 @@ if dataset_class == "MyDataset":
     train_ds, val_ds, test_ds = load_mydataset_pu(data_config)
 ```
 
-Also add model selection logic in `select_model()` to assign a backbone.
+In `train/model_factory.py`, add public benchmark backbone selection only. Put
+method-private or adapter-specific selectors under the method package.
 
 **Step 3: Create dataset configs**
 

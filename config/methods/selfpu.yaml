@@ -1,20 +1,33 @@
 selfpu:
+  metadata:
+    method_key: "selfpu"
+    trainer_key: "selfpu"
+  # Controlled PU-Bench entry for VITA-Group/Self-PU train_2s2t.py.
+  # Source default is 200 epochs; this benchmark default keeps the source phase
+  # order but shortens the run for cross-dataset sweeps.
+  init_bias_from_prior: false
+
   optimizer: "adam"
-  lr: 0.001
-  weight_decay: 0.0005
+  lr: 0.0005
+  weight_decay: 0.005
   batch_size: 256
-  num_epochs: 40
+  num_epochs: 80
   seed: 42
+  loss: "sigmoid"
+  gamma: 1.0
+  beta: 0.0
 
   # Silence metrics table printing in the first few epochs (hide F1=0 noise during warmup period)
   silence_metrics_before_epoch: 10
 
   self_paced_enabled: true
-  self_paced_start: 5
-  self_paced_frequency: 2
-  self_paced_rampup: 30
-  self_paced_top_p1: 0.1
-  self_paced_top_p2: 0.2
+  self_paced_start: 10
+  self_paced_stop: 50
+  self_paced_frequency: 10
+  self_paced_rampup: 100
+  self_paced_top_p1: 0.4
+  self_paced_top_p2: 0.6
+  soft_label: true
 
   replacement: true
   increasing: true
@@ -23,10 +36,12 @@ selfpu:
   pu_loss_weight: 1.0
 
   mean_teacher_enabled: true
-  mean_teacher_start: 10
+  mean_teacher_start: 50
   ema_decay: 0.999
   consistency_weight: 0.3
-  consistency_rampup: 20
+  consistency_rampup: 400
+  selfpu_type: "mu"
+  mutual_alpha: 0.1
 
   label_scheme:
     true_positive_label: 1
@@ -40,5 +55,5 @@ selfpu:
     mode: "max"
     early_stopping:
       enabled: true
-      patience: 10
+      patience: 20
       min_delta: 0.0001

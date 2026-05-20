@@ -1,35 +1,31 @@
 cgenpu:
+  metadata:
+    method_key: "cgenpu"
+    trainer_key: "cgenpu"
+  # Source-adapted PyTorch CGenPU package: train/cgenpu/.
+  # Author source file(s): cgenpu/pu/CGenPU.py and pu/misc/utils.py.
+
   # Training
   seed: 42
   num_epochs: 200
-  batch_size: 32
+  batch_size: 128
   lr: 1.0e-4
-  lr_d: 1.0e-4
-  lr_a: 5.0e-5
   beta1: 0.5
   beta2: 0.999
 
-  # Generator noise (reduced for text embeddings)
+  # Generator noise
   latent_dim: 256
-  z_type: "normal" # "uniform" | "normal"
+  z_type: "uniform" # "uniform" | "normal"
   # Generator output activation for vector/text: tanh keeps range in [-1,1]
   gen_out_activation: tanh
 
-  # Auxiliary classifier weight (increased for better alignment)
-  aux_strength: 0.5
-  # Pull A(x_u) mean toward class prior π to avoid all-positive collapse (ADNI helpful)
-  prior_reg: 3.0
-  # Extra prior alignment on real U (not only generated): stronger on ADNI
-  prior_reg_u: 5.0
-  # Smooth positive target for A to mitigate collapse
-  pos_label_smoothing: 0.1
-  # Freeze G for a few epochs to stabilize D/A first
-  freeze_g_epochs: 5
-  # Encourage generator to produce harder negatives earlier
-  lr_g: 3.0e-4
-  # Disable noise first to stabilize AUC, re-enable later if needed
-  adni_aug_flip_prob: 0.25
-  adni_aug_noise_std: 0.02
+  # Auxiliary classifier weight
+  aux_strength: 1.0
+  # Benchmark-only conveniences, disabled by default for source-like runs.
+  prior_reg: 0.0
+  prior_bias_init: false
+  adni_aug_flip_prob: 0.0
+  adni_aug_noise_std: 0.0
 
   # KL divergence reduction method (true for mean, false for sum)
   # Matches original TF implementation's 'mean' parameter

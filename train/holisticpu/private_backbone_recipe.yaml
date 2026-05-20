@@ -1,0 +1,48 @@
+holisticpu_private_backbone:
+  # Package-local recipe for HolisticPU's method-private backbone diagnostics.
+  # This file is intentionally outside config/methods/, because that directory
+  # is reserved for equal-public-backbone benchmark methods.
+  #
+  # To run this diagnostic, copy these values into a temporary holisticpu config
+  # or construct params programmatically with method="holisticpu".
+  backbone_policy: "private"
+  private_backbone_arch: "auto"
+  expand_labels: false
+  init_bias_from_prior: false
+  optimizer: "sgd"
+  lr: 0.01
+  weight_decay: 0.0005
+  momentum: 0.9
+  nesterov: true
+  batch_size: 64
+  phase1_epochs: 15
+  phase2_epochs: 25
+  eval_step: 512
+  seed: 42
+  warmup_steps: 0
+  rho: 0.1
+  mu: 1
+  T: 1.0
+  threshold: 0.9
+  use_ema: true
+  ema_decay: 0.999
+  use_three_sigma: true
+  trend_filter_threshold: 0.022222222222222223
+  allow_small_batch_fallback: false
+  vec_weak_noise_std: 0.01
+  vec_strong_noise_std: 0.05
+  vec_strong_dropout: 0.05
+  label_scheme:
+    true_positive_label: 1
+    true_negative_label: 0
+    pu_labeled_label: 1
+    pu_unlabeled_label: -1
+  checkpoint:
+    enabled: true
+    save_model: false
+    monitor: "val_proxy_acc"
+    mode: "max"
+    early_stopping:
+      enabled: false
+      patience: 20
+      min_delta: 0.0001

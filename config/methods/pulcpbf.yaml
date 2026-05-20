@@ -1,7 +1,11 @@
 pulcpbf:
-  # Dataset/model
-  dataset_class: CIFAR10
-  model: cnn_cifar10
+  metadata:
+    method_key: "pulcpbf"
+    trainer_key: "pulcpbf"
+  # Dataset/model come from the dataset config. Do not pin a CIFAR backbone here;
+  # PU-Bench selects the public backbone for each dataset_class.
+  # Source-aligned image workflow under PU-Bench controlled splits/backbones;
+  # vector/tabular datasets use a benchmark-specific weak/strong extension.
 
   # Optimization
   lr: 0.002
@@ -25,11 +29,18 @@ pulcpbf:
 
   # Phase-2 (fine-tuning)
   phase2_epochs: 50
+  phase2_optimizer: adam
+  phase2_lamda: 0.5 # source train.py uses lamda=0.5
   T: 0.5 # temperature for pseudo-label sharpening
   mask_threshold: 0.9 # confidence threshold for strong branch
   lambda_u: 0.85 # weight for unlabeled consistency loss (matches original)
   warmup_steps: 0
-  co_entropy_phase2: 0.0 # optional: if needed separately; otherwise co_entropy is reused
+
+  # Source-image defaults; set nonzero only for explicit benchmark variants.
+  warmup_pos_boost: 1.0
+  beta_min: 0.0
+  prior_reg_weight: 0.0
+  init_bias_from_prior: false
 
   # Vector augment (for non-image datasets)
   vec_weak_noise_std: 0.02

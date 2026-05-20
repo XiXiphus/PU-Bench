@@ -1,4 +1,11 @@
 lbe:
+  metadata:
+    method_key: "lbe"
+    trainer_key: "lbe"
+  # Controlled PU-Bench adaptation of author-provided LBE_MLP source:
+  # author source file(s): lbe_author_provided/LBE_MLP/{train.py,em.py}.
+  # Keeps the EM posterior, 10% M-step subsampling, and 80% small-loss update
+  # while using shared PU-Bench backbones and loaders.
   optimizer: "adam"
   lr: 0.0005
   weight_decay: 0.0001
@@ -7,13 +14,14 @@ lbe:
   seed: 42
 
   # LBE specific parameters
-  pretrain_epochs: 20
+  # Source uses 100 full-data Adam steps per model.
+  pretrain_epochs: 100
   m_steps: 20 # M-steps per EM epoch, closer to the original implementation
   # Memory- and stability-related knobs
   subset_ratio: 0.1
   topk_keep: 0.8
-  m_step_eval_batch_size: 512
   m_step_train_batch_size: 512
+  init_bias_from_prior: false
 
   label_scheme:
     true_positive_label: 1

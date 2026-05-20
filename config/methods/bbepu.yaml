@@ -1,4 +1,10 @@
 bbepu:
+  metadata:
+    method_key: "bbepu"
+    trainer_key: "bbepu"
+  # Controlled PU-Bench hybrid: the author-source BBE estimator estimates the
+  # positive fraction inside U, then PU-Bench's nnPU risk trains with it.
+
   # Optimizer settings
   optimizer: "adam"
   lr: 0.0003
@@ -19,6 +25,7 @@ bbepu:
   gamma: 0.5 # nnPU gamma parameter (stabilize on text)
   beta: 0.1 # nnPU beta parameter (non-negative constraint)
   loss_type: "sigmoid" # Loss function type: "sigmoid", "logistic", "squared"
+  init_bias_from_prior: false
 
   # Label scheme (standard for PU learning)
   label_scheme:

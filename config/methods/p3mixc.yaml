@@ -1,4 +1,9 @@
 p3mixc:
+  metadata:
+    method_key: "p3mixc"
+    trainer_key: "p3mixc"
+  # Controlled PU-Bench adaptation of the source P3Mix-C loop:
+  # author source file(s): p3mix_supplement/P3MIX/hmix_train_c.py.
   optimizer: "adam"
   lr: 0.001
   weight_decay: 0.000001
@@ -16,11 +21,12 @@ p3mixc:
   p_upper: 0.85
   p_lower: 0.15
   alpha: 0.5
-  mix_layer: 3
+  mix_layer: -1
   positive_weight: 1.0
   unlabeled_weight: 0.5
   entropy_weight: 0.05
   elr_weight: 0.0
+  init_bias_from_prior: false
   milestones: [20, 40, 60, 80, 100]
   scheduler_gamma: 0.5
   label_scheme:
