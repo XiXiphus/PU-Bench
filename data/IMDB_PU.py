@@ -20,7 +20,8 @@ def _load_imdb_texts_via_hf(
         from datasets import load_dataset  # type: ignore
     except Exception as e:
         raise ImportError(
-            "datasets not installed. Please `pip install datasets` or provide ./datasets/aclImdb"
+            "datasets is not available in the active environment. Run `uv sync --locked` "
+            "or provide ./datasets/aclImdb."
         ) from e
 
     cache_dir = os.path.join(root_dir, "hf_cache")
@@ -218,7 +219,8 @@ def load_imdb_pu(
 
         except ImportError:
             raise ImportError(
-                "sentence-transformers not installed. Please run: pip install sentence-transformers"
+                "sentence-transformers is not available in the active environment. "
+                "Run `uv sync --locked`."
             )
 
     # L2 normalize SBERT embeddings to stabilize across batches

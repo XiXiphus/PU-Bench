@@ -148,7 +148,8 @@ def load_20news_pu(
 
         except ImportError:
             raise ImportError(
-                "sentence-transformers not installed. Please run: pip install sentence-transformers"
+                "sentence-transformers is not available in the active environment. "
+                "Run `uv sync --locked`."
             )
 
     # L2 normalize SBERT embeddings to stabilize scale across batches

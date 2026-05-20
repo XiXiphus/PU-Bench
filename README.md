@@ -15,7 +15,7 @@ PU-Bench provides a standardized framework for evaluating PU learning algorithms
 - [PU-Bench](#pu-bench)
   - [Table of Contents](#table-of-contents)
   - [Installation](#installation)
-  - [Dependency Notes](#dependency-notes)
+  - [Dependency Management](#dependency-management)
   - [Quick Start](#quick-start)
   - [Project Structure](#project-structure)
   - [Configuration System](#configuration-system)
@@ -44,18 +44,21 @@ PU-Bench provides a standardized framework for evaluating PU learning algorithms
 ```bash
 git clone https://github.com/XiXiphus/PU-Bench.git
 cd PU-Bench
-pip install -r requirements.txt
+uv sync --locked
 ```
 
-Key dependencies: PyTorch, torchvision, scikit-learn, sentence-transformers, pyyaml, rich.
+Dependencies are managed only through `pyproject.toml` and `uv.lock`. Use
+`uv run` for training commands so they execute inside the locked project
+environment.
 
 ---
 
-## Dependency Notes
+## Dependency Management
 
-- `requirements.txt` is intentionally **unpinned** to keep installation flexible and avoid version-locking across platforms.
-- In our experience, installing the **latest stable versions** from `requirements.txt` works for normal usage.
-- If you encounter environment-specific issues, please open an issue or PR with your platform, Python/PyTorch versions, and error log.
+- PU-Bench uses `uv` as the dependency manager. `pyproject.toml` is the single source for dependency metadata, and `uv.lock` records the resolved versions used for reproducible installs.
+- Run `uv sync --locked` after cloning. Run experiments with `uv run python -u run_train.py ...`.
+- When dependencies change, edit `pyproject.toml`, run `uv lock`, then commit both `pyproject.toml` and `uv.lock`.
+- If you encounter environment-specific issues, please open an issue or PR with your platform, Python, PyTorch, `uv` version, and error log.
 
 ---
 
@@ -64,7 +67,7 @@ Key dependencies: PyTorch, torchvision, scikit-learn, sentence-transformers, pyy
 **Run a single method on one dataset (conventional setting):**
 
 ```bash
-python run_train.py \
+uv run python -u run_train.py \
   --dataset-config config/datasets_typical/param_sweep_mnist.yaml \
   --methods nnpu
 ```
@@ -72,7 +75,7 @@ python run_train.py \
 **Run multiple methods:**
 
 ```bash
-python run_train.py \
+uv run python -u run_train.py \
   --dataset-config config/datasets_typical/param_sweep_cifar10.yaml \
   --methods nnpu vpu distpu p3mixc
 ```
@@ -80,17 +83,17 @@ python run_train.py \
 **Run all methods on all datasets:**
 
 ```bash
-python run_train.py \
+uv run python -u run_train.py \
   --dataset-config config/datasets_typical/param_sweep_mnist.yaml \
-                    config/datasets_typical/param_sweep_cifar10.yaml \
-                    config/datasets_typical/param_sweep_imdb_sbert.yaml
+                   config/datasets_typical/param_sweep_cifar10.yaml \
+                   config/datasets_typical/param_sweep_imdb_sbert.yaml
 # omit --methods to run all available methods
 ```
 
 **Preview planned runs (dry run):**
 
 ```bash
-python run_train.py \
+uv run python -u run_train.py \
   --dataset-config config/datasets_vary_c/param_sweep_mnist.yaml \
   --methods nnpu vpu --dry-run
 ```
