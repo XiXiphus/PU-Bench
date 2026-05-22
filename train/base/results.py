@@ -24,16 +24,22 @@ class ResultSummaryMixin:
             else None
         )
 
+        duration_sec = (
+            float(self._run_end_time - self._run_start_time)
+            if (self._run_start_time is not None and self._run_end_time is not None)
+            else None
+        )
+        time_to_best_sec = None
         if self.checkpoint_handler and hasattr(
             self.checkpoint_handler, "best_elapsed_seconds"
         ):
-            duration_sec = self.checkpoint_handler.best_elapsed_seconds
-        else:
-            duration_sec = (
-                float(self._run_end_time - self._run_start_time)
-                if (self._run_start_time is not None and self._run_end_time is not None)
-                else None
-            )
+            try:
+                best_elapsed = self.checkpoint_handler.best_elapsed_seconds
+                time_to_best_sec = (
+                    float(best_elapsed) if best_elapsed is not None else None
+                )
+            except Exception:
+                time_to_best_sec = None
 
         dataset_info = self._collect_dataset_stats()
 
@@ -49,17 +55,34 @@ class ResultSummaryMixin:
             monitor = self.checkpoint_handler.monitor
         else:
             try:
+                prior_calibrated_fallback = self._oracle_prior_calibrated_fallback()
                 train_metrics = evaluate_metrics(
-                    self.model, self.train_loader, self.device, self.prior
+                    self.model,
+                    self.train_loader,
+                    self.device,
+                    self.prior,
+                    prior_calibrated_fallback=prior_calibrated_fallback,
                 )
                 test_metrics = evaluate_metrics(
-                    self.model, self.test_loader, self.device, self.prior
+                    self.model,
+                    self.test_loader,
+                    self.device,
+                    self.prior,
+                    prior_calibrated_fallback=prior_calibrated_fallback,
                 )
                 merged_metrics = {f"train_{k}": v for k, v in train_metrics.items()}
                 merged_metrics.update({f"test_{k}": v for k, v in test_metrics.items()})
                 best = {"epoch": int(self.global_epoch), "metrics": merged_metrics}
             except Exception:
                 pass
+
+        method_metadata = (
+            self.params.get("method_metadata", {})
+            if isinstance(self.params, dict)
+            else {}
+        )
+        if not isinstance(method_metadata, dict):
+            method_metadata = {}
 
         return {
             "method": self.method,
@@ -70,12 +93,14 @@ class ResultSummaryMixin:
                 "start": start_iso,
                 "end": end_iso,
                 "duration_seconds": duration_sec,
+                "time_to_best_seconds": time_to_best_sec,
             },
             "max_gpu_memory_bytes": self._max_gpu_mem_bytes,
             "dataset": dataset_info,
             "best": best,
             "monitor": monitor,
             "global_epochs": int(self.global_epoch),
+            "method_metadata": method_metadata,
             "hyperparameters": self.params,
         }
 

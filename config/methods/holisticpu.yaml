@@ -2,6 +2,29 @@ holisticpu:
   metadata:
     method_key: "holisticpu"
     trainer_key: "holisticpu"
+    alignment:
+      level: "mixed_controlled_adaptation"
+      source_reproduction: false
+      claim_note: >-
+        Not an author training-script reproduction: the image path retains the
+        active HolisticPU two-stage trend/partition/fine-tuning recipe, while
+        PU-Bench uses benchmark loaders, public backbones by default, proxy
+        checkpoints, and benchmark-specific vector/tabular extensions.
+      source_references:
+        - "https://github.com/wxr99/HolisticPU/tree/4d4ce7d6ba29722995d308293374c0f475d988d3"
+      retained_source_components:
+        - "two-logit classifier with class 0 as positive"
+        - "phase-1 positive-versus-unlabeled trend scoring"
+        - "Jenks partitioning with the source three_sigma filter"
+        - "phase-2 loss_ft soft-label/consistency objective"
+        - "source-style weak/strong image augmentation recipe"
+      benchmark_adaptations:
+        - "PU-Bench public backbone by default for main-table comparison"
+        - "PU-Bench loaders, checkpoints, proxy metrics, and dataset splits"
+        - "benchmark-specific weak/strong augmentation for vector and tabular datasets"
+      modality_alignment:
+        image: "source_aligned_recipe_with_controlled_backbone"
+        vector_tabular: "benchmark_specific_extension"
   # Source: wxr99/HolisticPU@4d4ce7d6ba29722995d308293374c0f475d988d3.
   # The source uses two logits with class 0 as positive and class 1 as
   # negative/unlabeled, SGD+Nesterov, simplified trend scores, Jenks breaks,

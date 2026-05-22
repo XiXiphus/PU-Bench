@@ -875,7 +875,7 @@ def _check_no_unread_method_config_keys(report: CheckReport) -> None:
 
         search_text = shared_text + "\n" + _read_python_text(method_paths)
         for key, value in entry.items():
-            if key == "metadata":
+            if key in {"metadata", "extends"}:
                 continue
             candidates = [(key, None)]
             if isinstance(value, dict):

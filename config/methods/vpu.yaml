@@ -2,6 +2,33 @@ vpu:
   metadata:
     method_key: "vpu"
     trainer_key: "vpu"
+    alignment:
+      level: "source_faithful_kernel_benchmark_wrapper"
+      source_reproduction: false
+      claim_note: >-
+        Not an author training-script reproduction: PU-Bench keeps VPU's
+        source variational kernel and optimizer/schedule recipe, but runs it
+        through benchmark dataset splits, public backbones, checkpoints, proxy
+        metrics, and result schemas.
+      source_references:
+        - "https://github.com/HC-Feynman/vpu/tree/603bcc1e628795f57a5ac87e5b0b977273b7cf91"
+      retained_source_components:
+        - "separate labeled-positive P loader and all-training-data X loader"
+        - "log-phi variational objective using output column 1"
+        - "mixup regularizer weighted by configured lam"
+        - "Adam betas (0.5, 0.99)"
+        - "30 source iterations per epoch"
+        - "20-epoch learning-rate halving with optimizer reset"
+        - "validation variational loss model-selection signal"
+        - "no prior-bias initialization"
+      benchmark_adaptations:
+        - "PU-Bench public backbone and controlled dataset splits"
+        - "PU-Bench checkpointing, proxy metrics, and result schema"
+        - "binary log-softmax adapter for single-logit benchmark backbones"
+        - "safe positive-batch resampling when benchmark P batches are smaller than X batches"
+        - "unified benchmark oracle/proxy metrics rather than the source-script normalized test decision rule"
+      known_resource_risks:
+        - "source default batch_size=500 is retained and can be high-memory on large image datasets"
   # Source-faithful switches follow HC-Feynman/vpu:
   # separate P/X loaders, Adam betas=(0.5, 0.99), mix_alpha=0.3, lam regularizer,
   # 30 source iterations per epoch, and 20-epoch LR halving with optimizer reset.
@@ -29,6 +56,6 @@ vpu:
     monitor: "val_vpu_var_loss"
     mode: "min"
     early_stopping:
-      enabled: true
+      enabled: false
       patience: 10
       min_delta: 0.0001

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import os
 
 import numpy as np
@@ -55,6 +56,7 @@ class ModelCheckpoint:
         verbose: bool = True,
         file_console: Console | None = None,
         early_stopping_params: dict | None = None,
+        keep_best_state: bool = False,
     ):
         """
         Args:
@@ -74,6 +76,7 @@ class ModelCheckpoint:
         self.monitor = monitor
         self.mode = mode
         self.save_model = save_model
+        self.keep_best_state = keep_best_state
         self.verbose = verbose
         self.file_console = file_console
 
@@ -84,6 +87,7 @@ class ModelCheckpoint:
         self.best_epoch = -1
         self.best_metrics = None
         self.best_elapsed_seconds: float | None = None
+        self.best_state_dict = None
 
         # Early stopping attributes
         self.early_stopping_enabled = False
@@ -110,6 +114,7 @@ class ModelCheckpoint:
         self.best_epoch = -1
         self.best_metrics = None
         self.best_elapsed_seconds = None
+        self.best_state_dict = None
         self.wait = 0
         self.should_stop = False
         if hasattr(self, "_warned"):
@@ -124,6 +129,15 @@ class ModelCheckpoint:
     def update_best_metrics(self, metrics: dict[str, float]) -> None:
         if self.best_metrics is not None:
             self.best_metrics.update(metrics)
+
+    def _clone_state_dict(self, model: torch.nn.Module) -> dict:
+        cloned = {}
+        for key, value in model.state_dict().items():
+            if torch.is_tensor(value):
+                cloned[key] = value.detach().cpu().clone()
+            else:
+                cloned[key] = copy.deepcopy(value)
+        return cloned
 
     def _log(self, message: str, style: str = None):
         """Log to stdout and, if provided, to a file-backed Rich Console."""
@@ -179,6 +193,8 @@ class ModelCheckpoint:
 
             if self.save_model:
                 torch.save(model.state_dict(), self.save_path)
+            if self.keep_best_state:
+                self.best_state_dict = self._clone_state_dict(model)
 
             # Reset wait counter on improvement
             self.wait = 0

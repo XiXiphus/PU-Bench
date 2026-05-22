@@ -491,6 +491,22 @@ def create_pu_training_set(
             result = (*result, out_roles)
         return result
 
+    def _pack_permuted_result(
+        out_features: np.ndarray,
+        out_labels: np.ndarray,
+        out_labeled_mask: np.ndarray,
+        out_source_indices: np.ndarray,
+        out_roles: np.ndarray,
+    ):
+        perm = rng.permutation(len(out_labels))
+        return _pack_result(
+            out_features[perm],
+            out_labels[perm],
+            out_labeled_mask[perm],
+            out_source_indices[perm],
+            out_roles[perm],
+        )
+
     if scenario == "single":
         # One-sample PU: keep the original sample; selected positives are L and
         # every other point is U. Under SCAR, c=P(S=1|Y=1); under SAR, e(x)
@@ -613,7 +629,7 @@ def create_pu_training_set(
                 axis=0,
             )
 
-            return _pack_result(
+            return _pack_permuted_result(
                 new_features,
                 new_labels,
                 new_labeled_mask,
@@ -678,7 +694,7 @@ def create_pu_training_set(
             axis=0,
         )
 
-        return _pack_result(
+        return _pack_permuted_result(
             new_features, new_labels, new_labeled_mask, new_source_indices, new_roles
         )
 

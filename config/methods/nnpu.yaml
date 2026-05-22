@@ -2,6 +2,28 @@ nnpu:
   metadata:
     method_key: "nnpu"
     trainer_key: "nnpu"
+    alignment:
+      level: "source_faithful_kernel_benchmark_wrapper"
+      source_reproduction: false
+      claim_note: >-
+        Not an author training-script reproduction: PU-Bench keeps the Kiryo
+        nnPU risk estimator semantics, label convention, and U-prior meaning,
+        but runs the single-model trainer through benchmark dataset splits,
+        public backbones, checkpointing, proxy metrics, and result schemas.
+      source_references:
+        - "https://github.com/kiryor/nnPUlearning/tree/3d9769e60dd275e8e4dcf91e1853f3b76c69f39f"
+      retained_source_components:
+        - "PU labels +1 for labeled positives and -1 for unlabeled samples"
+        - "risk prior is the positive fraction inside U"
+        - "non-negative PU risk with beta=0 and gamma=1 by default"
+        - "source default sigmoid surrogate loss"
+        - "Adam optimizer family"
+        - "no prior-bias initialization"
+      benchmark_adaptations:
+        - "PU-Bench public backbone and controlled dataset splits"
+        - "PU-Bench learning rate, weight decay, batch size, and epoch budget"
+        - "PU-Bench checkpointing, proxy metrics, and result schema"
+        - "validation monitor val_proxy_acc instead of source train/test zero-one error reporting"
   # Source-faithful switches follow kiryor/nnPUlearning:
   # Adam optimizer, sigmoid surrogate, beta=0, gamma=1, and no prior-bias init.
   # LR, weight decay, and epoch count remain PU-Bench benchmark hyperparameters.
@@ -26,6 +48,6 @@ nnpu:
     monitor: "val_proxy_acc"
     mode: "max"
     early_stopping:
-      enabled: true
+      enabled: false
       patience: 10
       min_delta: 0.0001

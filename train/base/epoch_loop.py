@@ -13,6 +13,9 @@ from ..metrics import evaluate_metrics, evaluate_proxy_metrics
 class EpochLoopMixin:
     """Default per-epoch evaluation loop for BaseTrainer subclasses."""
 
+    def _oracle_prior_calibrated_fallback(self) -> bool:
+        return bool(self.params.get("oracle_prior_calibrated_fallback", False))
+
     def _run_epochs(self, num_epochs: int, stage_name: str = "Training"):
         test_metrics = {}
 
@@ -65,15 +68,28 @@ class EpochLoopMixin:
 
     def evaluate(self) -> tuple[dict, dict | None, dict]:
         scenario = self.params.get("scenario", "single")
+        prior_calibrated_fallback = self._oracle_prior_calibrated_fallback()
         train_oracle = evaluate_metrics(
-            self.model, self.train_loader, self.device, self.prior
+            self.model,
+            self.train_loader,
+            self.device,
+            self.prior,
+            prior_calibrated_fallback=prior_calibrated_fallback,
         )
         test_oracle = evaluate_metrics(
-            self.model, self.test_loader, self.device, self.prior
+            self.model,
+            self.test_loader,
+            self.device,
+            self.prior,
+            prior_calibrated_fallback=prior_calibrated_fallback,
         )
         val_oracle = (
             evaluate_metrics(
-                self.model, self.validation_loader, self.device, self.prior
+                self.model,
+                self.validation_loader,
+                self.device,
+                self.prior,
+                prior_calibrated_fallback=prior_calibrated_fallback,
             )
             if self.validation_loader is not None
             else None

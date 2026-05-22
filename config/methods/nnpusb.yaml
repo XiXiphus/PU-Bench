@@ -2,6 +2,34 @@ nnpusb:
   metadata:
     method_key: "nnpusb"
     trainer_key: "nnpusb"
+    alignment:
+      level: "source_faithful_kernel_benchmark_wrapper"
+      source_reproduction: false
+      claim_note: >-
+        Not an author training-script reproduction: PU-Bench keeps the
+        MasaKat0 nnPUSB accept-reject selection rule, logistic nnPU risk, label
+        convention, and U-prior meaning, but runs the estimator through
+        benchmark data scorers and splits, public backbones, checkpointing,
+        proxy metrics, and result schemas.
+      source_references:
+        - "https://github.com/MasaKat0/PUlearning/blob/3401b77ccdd653d39f4f3a6258a42c7938fa9ede/BiasedPUlearning/nnPUSB/main_nnPUSB_mnist.py"
+        - "https://github.com/MasaKat0/PUlearning/blob/3401b77ccdd653d39f4f3a6258a42c7938fa9ede/BiasedPUlearning/nnPUSB/train_nnPU.py"
+      retained_source_components:
+        - "selected-bias positives use the source mean-normalize then max-normalize accept-reject rule when SAR-PUSB selection is requested"
+        - "logistic nnPU risk with beta=0 and gamma=1 equivalent to source negative-risk correction"
+        - "PU labels +1 for labeled positives and source unlabeled label 0 mapped to PU-Bench -1"
+        - "risk prior is the positive fraction inside U"
+        - "Adam optimizer family"
+        - "no positive-risk reweighting"
+        - "no prior-bias initialization"
+      benchmark_adaptations:
+        - "PyTorch port of the Chainer source implementation"
+        - "PU-Bench public backbone and controlled dataset splits"
+        - "PU-Bench learning rate, weight decay, batch size, and epoch budget"
+        - "PU-Bench checkpointing, proxy metrics, and result schema"
+        - "validation monitor val_proxy_acc instead of source test accuracy and quantile-evaluation logging"
+        - "selected-bias scores come from a PU-Bench PN scorer on the benchmark split instead of the source pretraining MLP on concatenated MNIST train/test"
+        - "benchmark may run the estimator under SCAR or non-source SAR splits for robustness evaluation"
   # Source-faithful switches follow MasaKat0/PUlearning nnPUSB:
   # Adam optimizer, logistic nnPU risk, beta=0, gamma=1, and no prior-bias init.
   # Benchmark runs may intentionally evaluate this estimator across SCAR and
@@ -26,6 +54,6 @@ nnpusb:
     monitor: "val_proxy_acc"
     mode: "max"
     early_stopping:
-      enabled: true
+      enabled: false
       patience: 10
       min_delta: 0.0001

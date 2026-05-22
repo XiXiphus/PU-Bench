@@ -16,6 +16,7 @@ import torch
 from torch import nn
 
 from ..base_trainer import BaseTrainer
+from ..checkpointing import CheckpointBundle
 from .models import (
     AClassifierCNN,
     CGenPUConvDiscriminatorADNI,
@@ -65,6 +66,20 @@ class CGenPUTrainer(BaseTrainer):
     def create_criterion(self):
         # BCE for D with probabilities; for A we use KLD terms directly
         return nn.BCELoss(reduction="mean")
+
+    def get_checkpoint_model(self):
+        return CheckpointBundle(
+            modules={
+                "discriminator": self.D,
+                "auxiliary": self.A,
+                "generator": self.G,
+            },
+            optimizers={
+                "optimizer_d": self.D_opt,
+                "optimizer_a": self.A_opt,
+                "optimizer_g": self.G_opt,
+            },
+        )
 
     def _build_model(self):
         # Ensure hyperparams are available even though before_training() hasn't run yet

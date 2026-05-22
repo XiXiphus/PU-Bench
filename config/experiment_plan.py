@@ -34,6 +34,7 @@ class RunSpec:
     experiment_name: str
     dataset_params: Dict[str, Any]
     method_params: Dict[str, Any]
+    method_metadata: Dict[str, Any]
     params: Dict[str, Any]
     case_control_mode: str | None = None
 
@@ -210,8 +211,10 @@ def build_plan(
         for method_name in method_names:
             method_config = method_config_map[method_name]
             method_params = method_config.params
+            method_metadata = copy.deepcopy(method_config.metadata)
             merged_params = copy.deepcopy(method_params)
             merged_params.update(data_run)
+            merged_params["method_metadata"] = method_metadata
             runs.append(
                 RunSpec(
                     dataset_name=dataset_name,
@@ -230,6 +233,7 @@ def build_plan(
                     ),
                     dataset_params=dict(data_run),
                     method_params=copy.deepcopy(method_params),
+                    method_metadata=method_metadata,
                     params=merged_params,
                     case_control_mode=data_run.get("case_control_mode"),
                 )
@@ -258,6 +262,7 @@ def run_spec_to_dict(run: RunSpec) -> Dict[str, Any]:
         "experiment_name": run.experiment_name,
         "dataset_params": copy.deepcopy(run.dataset_params),
         "method_params": copy.deepcopy(run.method_params),
+        "method_metadata": copy.deepcopy(run.method_metadata),
         "params": copy.deepcopy(run.params),
         "case_control_mode": run.case_control_mode,
     }

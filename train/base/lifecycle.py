@@ -145,6 +145,7 @@ class LifecycleMixin:
                 verbose=checkpoint_params.get("verbose", True),
                 file_console=self.file_console,
                 early_stopping_params=early_stopping_params,
+                keep_best_state=checkpoint_params.get("keep_best_state", False),
             )
             self._validate_checkpoint_monitor_config()
 

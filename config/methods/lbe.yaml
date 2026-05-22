@@ -2,6 +2,26 @@ lbe:
   metadata:
     method_key: "lbe"
     trainer_key: "lbe"
+    alignment:
+      level: "controlled_adaptation"
+      source_reproduction: false
+      claim_note: >-
+        Not an author training-script reproduction: PU-Bench keeps the LBE EM
+        posterior and small-loss M-step semantics, but runs them with benchmark
+        loaders, shared controlled backbones, checkpointing, and proxy metrics
+        instead of the author MLP training script and source dataset recipe.
+      source_references:
+        - "author-provided LBE_MLP source archive used for PU-Bench alignment"
+      retained_source_components:
+        - "E-step posterior P(y=1 | x, q)"
+        - "q=1 labeled positives as hard posterior anchors"
+        - "100 full-training-set Adam pretrain steps per model"
+        - "10 percent whole-dataset M-step subsampling"
+        - "global 80 percent small-loss classifier update"
+      benchmark_adaptations:
+        - "PU-Bench shared controlled backbone instead of the author MLP script"
+        - "PU-Bench loaders, checkpoints, proxy metrics, and dataset splits"
+        - "chunked full-dataset pretraining and M-step passes for memory control"
   # Controlled PU-Bench adaptation of author-provided LBE_MLP source:
   # author source file(s): lbe_author_provided/LBE_MLP/{train.py,em.py}.
   # Keeps the EM posterior, 10% M-step subsampling, and 80% small-loss update

@@ -2,6 +2,32 @@ cgenpu:
   metadata:
     method_key: "cgenpu"
     trainer_key: "cgenpu"
+    alignment:
+      level: "source_adapted_kernel_benchmark_wrapper"
+      source_reproduction: false
+      claim_note: >-
+        Not an author training-script reproduction: PU-Bench ports the
+        TensorFlow CGenPU D/A/G training kernel to PyTorch, then runs it through
+        benchmark dataset splits, public backbones, checkpointing, proxy
+        metrics, and result schemas.
+      source_references:
+        - "https://github.com/apapich/CGenPU/tree/ca6cc9d7b0dffd1736a3662d421633d29051f7c1"
+      retained_source_components:
+        - "D, auxiliary A, then G update order for each unlabeled batch"
+        - "separate labeled-positive xp stream and unlabeled xu stream"
+        - "positive latent class one-hot index 0 and negative index 1"
+        - "uniform or normal latent z generator"
+        - "KLD auxiliary classifier alignment terms"
+        - "generator loss that fools D and aligns A"
+        - "Adam beta1/beta2 source defaults"
+        - "configurable mean versus sum KLD reduction"
+      benchmark_adaptations:
+        - "PyTorch port of the TensorFlow source implementation"
+        - "PU-Bench public backbones and controlled dataset splits"
+        - "PU-Bench checkpointing, proxy metrics, and result schema"
+        - "validation monitor val_proxy_acc instead of source WandB/image callback logging"
+        - "benchmark-specific vector/text, MNIST, CIFAR, and AlzheimerMRI model adapters"
+        - "benchmark-only prior regularization, prior-bias init, and ADNI augmentation remain disabled by default"
   # Source-adapted PyTorch CGenPU package: train/cgenpu/.
   # Author source file(s): cgenpu/pu/CGenPU.py and pu/misc/utils.py.
 
@@ -38,7 +64,7 @@ cgenpu:
     monitor: "val_proxy_acc"
     mode: "max"
     early_stopping:
-      enabled: true
+      enabled: false
       patience: 30
       min_delta: 0.0001
 

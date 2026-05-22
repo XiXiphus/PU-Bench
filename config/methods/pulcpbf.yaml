@@ -2,6 +2,30 @@ pulcpbf:
   metadata:
     method_key: "pulcpbf"
     trainer_key: "pulcpbf"
+    alignment:
+      level: "mixed_controlled_adaptation"
+      source_reproduction: false
+      claim_note: >-
+        Not an author training-script reproduction: the image workflow keeps
+        PUL-CPBF's two-stage warmup, pseudo-label, and weak/strong consistency
+        recipe, while PU-Bench runs controlled dataset splits, public backbones,
+        benchmark checkpoints/proxy metrics, and a benchmark-specific
+        vector/tabular weak/strong extension.
+      source_references:
+        - "author-provided PUL-CPBF source archive used for PU-Bench alignment"
+      retained_source_components:
+        - "phase-1 warmup PU surrogate with asymmetric beta weighting"
+        - "trend and alpha_range pseudo-label generation"
+        - "phase-2 mixed target from current model pseudo-labels and phase-1 pseudo-labels"
+        - "weak/strong image augmentation recipe"
+        - "unlabeled phase-2 targets do not use oracle true labels"
+      benchmark_adaptations:
+        - "PU-Bench public backbone and controlled dataset splits"
+        - "PU-Bench loaders, checkpoints, proxy metrics, and result schema"
+        - "benchmark-specific weak/strong augmentation for vector and tabular datasets"
+      modality_alignment:
+        image: "source_aligned_recipe_with_controlled_backbone"
+        vector_tabular: "benchmark_specific_extension"
   # Dataset/model come from the dataset config. Do not pin a CIFAR backbone here;
   # PU-Bench selects the public backbone for each dataset_class.
   # Source-aligned image workflow under PU-Bench controlled splits/backbones;

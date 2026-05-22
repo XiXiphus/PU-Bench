@@ -17,6 +17,7 @@ PU-Bench provides a standardized framework for evaluating PU learning algorithms
   - [Installation](#installation)
   - [Dependency Management](#dependency-management)
   - [Quick Start](#quick-start)
+  - [Verification](#verification)
   - [Project Structure](#project-structure)
   - [Configuration System](#configuration-system)
     - [Dataset Configuration](#dataset-configuration)
@@ -101,6 +102,20 @@ uv run python -u run_train.py \
 Add `--plan-json /tmp/pu_bench_plan.json` to export the expanded run plan.
 
 By default, checkpointing and early stopping use `val_proxy_acc` on a PU-structured validation split. If you prefer AUC-oriented model selection, set `checkpoint.monitor: "val_proxy_auc"` in the corresponding method YAML.
+
+---
+
+## Verification
+
+For a fast local sanity check after editing configs or trainers:
+
+```bash
+uv run python -m unittest discover -s tests
+uv run python scripts/check_arch_contracts.py
+uv run python -u run_train.py \
+  --dataset-config config/datasets_smoke/param_sweep_mnist_seed2.yaml \
+  --methods nnpu nnpusb --dry-run --plan-json /tmp/pu_bench_plan.json
+```
 
 ---
 
@@ -224,6 +239,13 @@ Located in `config/methods/`. One YAML file per method.
 # config/methods/nnpu.yaml
 
 nnpu:
+  metadata:
+    method_key: "nnpu"
+    trainer_key: "nnpu"
+    alignment:
+      level: "source_faithful_kernel_benchmark_wrapper"
+      source_reproduction: false
+
   optimizer: "adam"
   lr: 0.0003
   weight_decay: 0.0001
@@ -260,9 +282,12 @@ nnpu:
 | `label_scheme`              | How ±1 / 0/1 labels are assigned to PU data                                                             |
 | `checkpoint.monitor`        | Fully qualified metric key for model selection (e.g. `val_proxy_acc`, `val_proxy_auc`, `val_oracle_f1`) |
 | `checkpoint.early_stopping` | Stop training when monitored metric stalls                                                              |
+| `metadata.method_key`       | Stable method identifier recorded in plans and result files                                             |
+| `metadata.trainer_key`      | Registry key used to resolve the trainer class                                                          |
+| `metadata.alignment`        | Optional source-alignment note distinguishing source-faithful kernels from benchmark adaptations         |
 | *(method-specific)*         | Any additional keys are passed to the Trainer (e.g., `gamma`, `beta`, `pretrain_epochs`)                |
 
-Metric names follow the pattern `<split>_<metric>`. Oracle metrics are prefixed with `oracle_`; PU-only proxy metrics are prefixed with `proxy_`.
+Metric names follow the pattern `<split>_<metric>`. Oracle metrics are prefixed with `oracle_`; PU-only proxy metrics are prefixed with `proxy_`. Method metadata is copied into expanded plan JSONs and per-run result summaries so source-faithful and benchmark-adapted entries can be audited without inspecting YAML by hand.
 
 ---
 
@@ -286,7 +311,7 @@ The `selection_strategies` field controls *how* positives are selected for label
 | **S1 — SCAR**  | `"random"`   | Uniform random selection            | Constant: e(x) = c        |
 | **S2 — LBE-A** | `"sar_lbeA"` | Favors high-posterior positives     | e(x) ∝ p̂(x)^k, k=10       |
 | **S3 — LBE-B** | `"sar_lbeB"` | Favors boundary/ambiguous positives | e(x) ∝ (1.5 + δ − p̂(x))^k |
-| **S4 — PUSB**  | `"sar_pusb"` | Deterministic top-scoring selection | Top-N by p̂(x)^α, α=20     |
+| **S4 — PUSB**  | `"sar_pusb"` | Source-style selected-bias accept-reject rule | Mean/max-normalized p̂(x) |
 
 For SAR strategies (S2–S4), an auxiliary logistic regression classifier is first trained on the full PN data to compute p̂(x), which is then used to derive instance-dependent propensity scores.
 

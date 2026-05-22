@@ -567,8 +567,15 @@ class SelfPUTrainer(BaseTrainer):
             self.console.log(f"Self-PU reporting candidate: {name}")
             self._last_report_model_name = name
         self._last_report_model = model
+        prior_calibrated_fallback = self._oracle_prior_calibrated_fallback()
 
-        train_metrics = evaluate_metrics(model, self.train_loader, self.device, self.prior)
+        train_metrics = evaluate_metrics(
+            model,
+            self.train_loader,
+            self.device,
+            self.prior,
+            prior_calibrated_fallback=prior_calibrated_fallback,
+        )
         train_metrics.update(
             evaluate_proxy_metrics(
                 model,
@@ -587,11 +594,18 @@ class SelfPUTrainer(BaseTrainer):
                 self.validation_loader,
                 self.device,
                 self.prior,
+                prior_calibrated_fallback=prior_calibrated_fallback,
             )
             val_metrics.update(selected_proxy)
             val_metrics["selfpu_report_model_id"] = float(candidate_id)
 
-        test_metrics = evaluate_metrics(model, self.test_loader, self.device, self.prior)
+        test_metrics = evaluate_metrics(
+            model,
+            self.test_loader,
+            self.device,
+            self.prior,
+            prior_calibrated_fallback=prior_calibrated_fallback,
+        )
         test_metrics["selfpu_report_model_id"] = float(candidate_id)
         return train_metrics, val_metrics, test_metrics
 

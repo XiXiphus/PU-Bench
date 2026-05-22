@@ -2,6 +2,19 @@ bbepu:
   metadata:
     method_key: "bbepu"
     trainer_key: "bbepu"
+    alignment:
+      level: "controlled_adaptation"
+      source_reproduction: false
+      claim_note: "Not an author training-script reproduction: PU-Bench uses the author BBE estimator for U-prior estimation, then trains with the benchmark nnPU risk and public backbone."
+      source_references:
+        - "https://github.com/acmi-lab/PU_learning/tree/5e5e350dc0588de95a36eb952e3cf5382e786aec"
+      retained_source_components:
+        - "BBE mixture-proportion estimator"
+        - "validation P/U score prior-estimation interface"
+      benchmark_adaptations:
+        - "PU-Bench nnPU risk for the supervised training loop"
+        - "stage-switch prior update instead of online source-script cadence"
+        - "PU-Bench public backbone, loaders, checkpoints, and proxy metrics"
   # Controlled PU-Bench hybrid: the author-source BBE estimator estimates the
   # positive fraction inside U, then PU-Bench's nnPU risk trains with it.
 

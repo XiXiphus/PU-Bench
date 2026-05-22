@@ -623,11 +623,20 @@ class HolisticPUTrainer(BaseTrainer):
 
     def _evaluate_and_checkpoint(self, stage_epoch: int) -> dict[str, float]:
         scenario = self.params.get("scenario", "single")
+        prior_calibrated_fallback = self._oracle_prior_calibrated_fallback()
         train_oracle = evaluate_metrics(
-            self.get_eval_model(), self.train_loader, self.device, self.prior
+            self.get_eval_model(),
+            self.train_loader,
+            self.device,
+            self.prior,
+            prior_calibrated_fallback=prior_calibrated_fallback,
         )
         test_metrics = evaluate_metrics(
-            self.get_eval_model(), self.test_loader, self.device, self.prior
+            self.get_eval_model(),
+            self.test_loader,
+            self.device,
+            self.prior,
+            prior_calibrated_fallback=prior_calibrated_fallback,
         )
         train_proxy = evaluate_proxy_metrics(
             self.get_eval_model(), self.train_loader, self.device, self.prior, scenario
@@ -637,7 +646,11 @@ class HolisticPUTrainer(BaseTrainer):
         val_metrics = None
         if self.validation_loader is not None:
             val_oracle = evaluate_metrics(
-                self.get_eval_model(), self.validation_loader, self.device, self.prior
+                self.get_eval_model(),
+                self.validation_loader,
+                self.device,
+                self.prior,
+                prior_calibrated_fallback=prior_calibrated_fallback,
             )
             val_proxy = evaluate_proxy_metrics(
                 self.get_eval_model(),

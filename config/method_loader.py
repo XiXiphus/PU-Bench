@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import copy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List
@@ -91,6 +92,26 @@ def _load_method_config_from_path(path: Path) -> MethodConfig:
             f"Method config '{path}' must deserialize to a mapping, got {type(data).__name__}"
         )
 
+    default_method_key, entry = _extract_method_entry(data, fallback_method_key=path.stem.lower())
+    extends = entry.pop("extends", None)
+    if extends:
+        base_config = load_method_config(str(extends), path.parent)
+        method_key, trainer_key, params, metadata = normalize_method_config(
+            {default_method_key: entry},
+            fallback_method_key=default_method_key,
+        )
+        merged_params = copy.deepcopy(base_config.params)
+        merged_params.update(params)
+        merged_metadata = copy.deepcopy(base_config.metadata)
+        merged_metadata.update(metadata)
+        return MethodConfig(
+            method_key=method_key,
+            trainer_key=trainer_key,
+            params=merged_params,
+            metadata=merged_metadata,
+            source_path=path,
+        )
+
     method_key, trainer_key, params, metadata = normalize_method_config(
         data,
         fallback_method_key=path.stem.lower(),
@@ -102,6 +123,21 @@ def _load_method_config_from_path(path: Path) -> MethodConfig:
         metadata=metadata,
         source_path=path,
     )
+
+
+def _extract_method_entry(
+    data: Dict[str, Any],
+    *,
+    fallback_method_key: str,
+) -> tuple[str, Dict[str, Any]]:
+    if fallback_method_key in data and isinstance(data[fallback_method_key], dict):
+        return fallback_method_key, dict(data[fallback_method_key])
+    if len(data) == 1:
+        only_key = next(iter(data))
+        only_value = data[only_key]
+        if isinstance(only_value, dict):
+            return str(only_key).lower(), dict(only_value)
+    return fallback_method_key, dict(data)
 
 
 __all__ = [

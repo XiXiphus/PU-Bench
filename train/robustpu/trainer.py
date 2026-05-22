@@ -545,11 +545,13 @@ class RobustPUTrainer(BaseTrainer):
 
     def _evaluate_current_model(self):
         scenario = self.params.get("scenario", "single")
+        prior_calibrated_fallback = self._oracle_prior_calibrated_fallback()
         train_metrics = evaluate_metrics(
             self.model,
             self.train_loader,
             self.device,
             self.prior,
+            prior_calibrated_fallback=prior_calibrated_fallback,
         )
         train_metrics.update(
             evaluate_proxy_metrics(
@@ -561,7 +563,13 @@ class RobustPUTrainer(BaseTrainer):
             )
         )
         val_metrics = (
-            evaluate_metrics(self.model, self.validation_loader, self.device, self.prior)
+            evaluate_metrics(
+                self.model,
+                self.validation_loader,
+                self.device,
+                self.prior,
+                prior_calibrated_fallback=prior_calibrated_fallback,
+            )
             if self.validation_loader is not None
             else None
         )
@@ -580,6 +588,7 @@ class RobustPUTrainer(BaseTrainer):
             self.test_loader,
             self.device,
             self.prior,
+            prior_calibrated_fallback=prior_calibrated_fallback,
         )
         if self.last_weight_stats:
             train_metrics.update(self.last_weight_stats)

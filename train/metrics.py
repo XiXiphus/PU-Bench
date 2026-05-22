@@ -108,6 +108,7 @@ def evaluate_metrics(
     loader: DataLoader,
     device: torch.device,
     prior: float,
+    prior_calibrated_fallback: bool = False,
 ) -> dict[str, float]:
     """Evaluate oracle metrics using true labels on a PU-formatted loader."""
     y_true_all, y_pred_all, y_scores_all = [], [], []
@@ -128,10 +129,11 @@ def evaluate_metrics(
     y_pred_arr = np.array(y_pred_all)
     y_score_arr = np.array(y_scores_all)
 
-    # Prior-calibrated fallback: if predictions collapse to a single class,
-    # recalibrate threshold so predicted positive fraction matches prior.
+    # Optional legacy fallback: recalibrate degenerate single-class predictions
+    # to match the PU prior. Keep it off by default so oracle metrics reflect
+    # the model's actual decision rule.
     try:
-        if np.unique(y_pred_arr).size == 1:
+        if prior_calibrated_fallback and np.unique(y_pred_arr).size == 1:
             n = len(y_score_arr)
             k = int(round(float(prior) * float(n)))
             if 0 < k < n:
