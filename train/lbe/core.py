@@ -11,6 +11,7 @@ These helpers mirror the author-provided implementation under
 from __future__ import annotations
 
 import torch
+import torch.nn.functional as F
 
 
 def observed_label_pretrain_loss(
@@ -26,7 +27,6 @@ def observed_label_pretrain_loss(
     """
 
     q = q.view(-1).float()
-    p = torch.sigmoid(logits.view(-1))
     if proportion_labeled is None:
         proportion_labeled = q.mean()
     elif not torch.is_tensor(proportion_labeled):
@@ -35,10 +35,13 @@ def observed_label_pretrain_loss(
         )
     else:
         proportion_labeled = proportion_labeled.to(device=q.device, dtype=q.dtype)
-    return -(
-        q * (1 - proportion_labeled) * torch.log(p)
-        + proportion_labeled * (1 - q) * torch.log(1 - p)
-    ).mean()
+    weights = q * (1 - proportion_labeled) + (1 - q) * proportion_labeled
+    return F.binary_cross_entropy_with_logits(
+        logits.view(-1),
+        q,
+        weight=weights,
+        reduction="mean",
+    )
 
 
 def posterior_y1(

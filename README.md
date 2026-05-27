@@ -4,7 +4,7 @@ A unified open-source benchmark for **Positive-Unlabeled (PU) learning**.
 
 PU-Bench provides a standardized framework for evaluating PU learning algorithms under consistent conditions, covering data generation, training, and evaluation in a single reproducible pipeline. It currently integrates **18 PU methods** plus a fully supervised **PN** oracle baseline across **9 datasets** spanning text, image, and tabular modalities.
 
-> **Paper**: [PU-Bench: A Unified Benchmark for Rigorous and Reproducible PU Learning](https://openreview.com/forum?id=tb8DabMbMq) (ICLR 2026)
+> **Paper**: [PU-Bench: A Unified Benchmark for Rigorous and Reproducible PU Learning](https://openreview.net/forum?id=tb8DabMbMq) (ICLR 2026)
 >
 > **Friendly Link**: PU-Bench now supports the PU-only validation metrics `PA` and `PAUC` introduced in [Accessible, Realistic, and Fair Evaluation of Positive-Unlabeled Learning Algorithms (ICLR 2026)](https://openreview.net/forum?id=5R11h5o44C), exposed here as `proxy_acc` and `proxy_auc`. If you are looking for the authors' official benchmark release, please also see [wu-dd/PUBench](https://github.com/wu-dd/PUBench).
 
