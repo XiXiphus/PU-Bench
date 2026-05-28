@@ -27,6 +27,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torch.utils.data import DataLoader, Subset
 from typing import Any, Dict
 
 from ..base_trainer import BaseTrainer
@@ -44,6 +45,7 @@ from .augment import (
     TransformPULCPBFEval,
     infer_image_profile,
 )
+from .model_selector import select_model
 
 
 def _select_loss(loss_name: str):
@@ -92,6 +94,12 @@ class PULCPBFTrainer(BaseTrainer):
 
         # Loss/regularization related
         self.co_entropy = float(self.params.get("co_entropy", 0.0))
+        self.phase1_co_entropy = float(
+            self.params.get("phase1_co_entropy", self.co_entropy)
+        )
+        self.phase2_co_entropy = float(
+            self.params.get("phase2_co_entropy", self.co_entropy)
+        )
         self.lambda_u = float(
             self.params.get("lambda_u", 0.85)
         )  # Consistent with original implementation
@@ -105,6 +113,18 @@ class PULCPBFTrainer(BaseTrainer):
         self.beta_min = float(self.params.get("beta_min", 0.0))
         self.prior_reg_weight = float(self.params.get("prior_reg_weight", 0.0))
         self.phase2_lamda = float(self.params.get("phase2_lamda", 0.5))
+        self.source_style_loaders = bool(self.params.get("source_style_loaders", False))
+        self.phase1_eval_steps = int(self.params.get("phase1_eval_steps", 0))
+        self.phase2_eval_steps = int(self.params.get("phase2_eval_steps", 0))
+        self.phase2_reinitialize_model = bool(
+            self.params.get("phase2_reinitialize_model", False)
+        )
+        self.phase1_scheduler_name = str(
+            self.params.get("phase1_scheduler", "none")
+        ).lower()
+        self.phase1_step_size = int(self.params.get("phase1_step_size", 1))
+        self.phase1_step_gamma = float(self.params.get("phase1_step_gamma", 0.25))
+        self.alpha_range_binarize = bool(self.params.get("alpha_range_binarize", True))
         self.mask_threshold_start = float(
             self.params.get("mask_threshold_start", self.mask_threshold)
         )
@@ -130,8 +150,8 @@ class PULCPBFTrainer(BaseTrainer):
         # Stage 2 data augmentation
         self.batch_size = int(self.params.get("batch_size", 64))
 
-        # Pseudo-label cache: index -> {0,1}
-        self.pseudo_labels_map: Dict[int, int] | None = None
+        # Pseudo-label cache: index -> source pseudo target in [0, 1]
+        self.pseudo_labels_map: Dict[int, float] | None = None
 
         # Record U sample prediction probabilities for each epoch in stage 1 (for trend strategy)
         self._phase1_unlabeled_scores: list[np.ndarray] = []
@@ -145,6 +165,7 @@ class PULCPBFTrainer(BaseTrainer):
         self._is_image_like: bool | None = None
         # Generic scheduler placeholder (Phase-1 doesn't use, avoid attribute missing)
         self.scheduler = None
+        self._source_loader_cache: dict[tuple[int, int], DataLoader] = {}
 
     def _ensure_channel_match(self, x: torch.Tensor) -> torch.Tensor:
         """Align input x channel count to model first layer Conv2d in_channels.
@@ -174,10 +195,137 @@ class PULCPBFTrainer(BaseTrainer):
             out = x
         return out
 
+    def _dataset_pu_labels(self, dataset) -> np.ndarray | None:
+        current = dataset
+        seen: set[int] = set()
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            pu = getattr(current, "pu_labels", None)
+            if pu is not None:
+                if hasattr(pu, "detach"):
+                    return pu.detach().cpu().numpy()
+                return np.asarray(pu)
+            current = getattr(current, "base_dataset", getattr(current, "dataset", None))
+        return None
+
+    def _source_subset_loader(self, dataset, pu_value: int) -> DataLoader:
+        cache_key = (id(dataset), int(pu_value))
+        if cache_key in self._source_loader_cache:
+            return self._source_loader_cache[cache_key]
+
+        pu = self._dataset_pu_labels(dataset)
+        if pu is None:
+            raise RuntimeError("PULCPBF source-style loaders require dataset.pu_labels.")
+        positions = np.flatnonzero(pu == pu_value)
+        if positions.size == 0:
+            raise RuntimeError(
+                f"PULCPBF source-style loader found no samples with pu_label={pu_value}."
+            )
+        drop_last = positions.size >= self.batch_size
+        loader = DataLoader(
+            Subset(dataset, positions.tolist()),
+            batch_size=self.batch_size,
+            shuffle=True,
+            drop_last=drop_last,
+            **self._dataloader_worker_kwargs(),
+        )
+        self._source_loader_cache[cache_key] = loader
+        return loader
+
+    def _dataloader_worker_kwargs(self) -> dict[str, Any]:
+        num_workers = int(self.params.get("num_workers", 4))
+        kwargs: dict[str, Any] = {
+            "num_workers": num_workers,
+            "pin_memory": True,
+            "worker_init_fn": seed_worker,
+        }
+        if num_workers > 0:
+            kwargs["persistent_workers"] = bool(
+                self.params.get("persistent_workers", True)
+            )
+            kwargs["prefetch_factor"] = int(self.params.get("prefetch_factor", 4))
+        return kwargs
+
+    @staticmethod
+    def _next_batch(iterator, loader: DataLoader):
+        try:
+            return next(iterator), iterator
+        except StopIteration:
+            iterator = iter(loader)
+            return next(iterator), iterator
+
+    @staticmethod
+    def _weak_view(x):
+        return x[0] if isinstance(x, (list, tuple)) else x
+
+    @staticmethod
+    def _weak_strong_views(x):
+        if isinstance(x, (list, tuple)) and len(x) == 2:
+            return x[0], x[1]
+        return x, x
+
+    def _init_phase1_scheduler(self):
+        if self.phase1_scheduler_name in {"", "none", "null"}:
+            self.scheduler = None
+            return
+        if self.phase1_scheduler_name == "step":
+            self.scheduler = torch.optim.lr_scheduler.StepLR(
+                self.optimizer,
+                step_size=max(1, self.phase1_step_size),
+                gamma=self.phase1_step_gamma,
+            )
+            return
+        raise ValueError(
+            f"Unsupported PULCPBF phase1_scheduler: {self.phase1_scheduler_name}"
+        )
+
+    def _replace_model_for_non_image_if_needed(self):
+        if self._is_image_like is not False:
+            return
+        has_conv2d = any(isinstance(m, nn.Conv2d) for m in self.model.modules())
+        if has_conv2d:
+            from backbone.models import MLP_20News
+
+            self.model = MLP_20News(prior=getattr(self, "prior", 0.0))
+            self.model.to(self.device)
+            self._model_in_channels = None
+            model_params = (
+                self.model.params()
+                if hasattr(self.model, "params")
+                else self.model.parameters()
+            )
+            self.optimizer = self._make_optimizer(
+                model_params, lr=self.lr, weight_decay=self.weight_decay
+            )
+            self.criterion = self.create_criterion()
+
+    def _reinitialize_model_for_phase2(self):
+        self.model = self.create_model().to(self.device)
+        self._model_in_channels = None
+        self._replace_model_for_non_image_if_needed()
+
     # ---------------- BaseTrainer Interface ----------------
     def create_criterion(self):
         # Binary classification BCE with logits (stage 2 main loss)
         return nn.BCEWithLogitsLoss()
+
+    def create_model(self):
+        return select_model(params=self.params, prior=self.prior)
+
+    def before_training(self):
+        super().before_training()
+        if self.file_console:
+            self.file_console.log("PULCPBF source alignment:")
+            self.file_console.log(
+                f"  backbone_policy={self.params.get('backbone_policy', 'controlled')}, "
+                f"private_backbone_arch={self.params.get('private_backbone_arch', 'auto')}, "
+                f"model={self.model.__class__.__name__}, "
+                f"params={sum(p.numel() for p in self.model.parameters()) / 1e6:.3f}M"
+            )
+            self.file_console.log(
+                f"  source_style_loaders={self.source_style_loaders}, "
+                f"phase1_epochs={self.phase1_epochs}, phase2_epochs={self.phase2_epochs}"
+            )
 
     def train_one_epoch(self, epoch_idx: int):
         if self.current_phase == 1:
@@ -200,6 +348,9 @@ class PULCPBFTrainer(BaseTrainer):
 
         # Generate stage 2 pseudo-labels
         self._generate_pseudo_labels()
+
+        if self.phase2_reinitialize_model:
+            self._reinitialize_model_for_phase2()
 
         # Wrap training data (weak/strong augmentation)
         self._ensure_phase2_train_dataset()
@@ -239,24 +390,23 @@ class PULCPBFTrainer(BaseTrainer):
         except Exception:
             is_image_like = False
         self._is_image_like = is_image_like
-        if not is_image_like:
-            has_conv2d = any(isinstance(m, nn.Conv2d) for m in self.model.modules())
-            if has_conv2d:
-                from backbone.models import MLP_20News
-
-                self.model = MLP_20News(prior=getattr(self, "prior", 0.0))
-                self.model.to(self.device)
+        self._replace_model_for_non_image_if_needed()
         if bool(self.params.get("init_bias_from_prior", False)):
             try:
                 self._init_bias_from_prior()
             except Exception:
                 pass
+        self._init_phase1_scheduler()
 
         # Use generic epoch runner to execute and print Phase-1 (Warming-up) metrics
         self.current_phase = 1
         _ = self._run_epochs(self.phase1_epochs, stage_name="Warming-up")
 
     def _train_epoch_phase1(self, epoch_idx: int):
+        if self.source_style_loaders:
+            self._train_epoch_phase1_source_loaders(epoch_idx)
+            return
+
         self.model.train()
         loss_fn = _select_loss(self.loss_name)
 
@@ -313,9 +463,9 @@ class PULCPBFTrainer(BaseTrainer):
 
             # Entropy minimization: only for unlabeled sample (U) probabilities
             loss_ent = torch.tensor(0.0, device=self.device)
-            if self.co_entropy > 0 and u_mask.any():
+            if self.phase1_co_entropy > 0 and u_mask.any():
                 probs_u = torch.sigmoid(logits_clamped[u_mask])
-                loss_ent = self.co_entropy * _entropy_minimization(probs_u)
+                loss_ent = self.phase1_co_entropy * _entropy_minimization(probs_u)
 
             # Prior matching regularization: constrain average prediction probability close to training prior π
             prob_mean = torch.sigmoid(logits_clamped).mean()
@@ -334,6 +484,103 @@ class PULCPBFTrainer(BaseTrainer):
         if self.file_console and num_batches > 0:
             self.file_console.log(
                 f"Phase1[{epoch_idx}/{self.phase1_epochs}] - Loss: {total_loss/max(1,num_batches):.4f}, beta={beta:.4f}, prior_reg={self.prior_reg_weight:.3f}, pos_boost={self.warmup_pos_boost:.2f}, LR: {self.optimizer.param_groups[0]['lr']:.6f}"
+            )
+
+    def _train_epoch_phase1_source_loaders(self, epoch_idx: int):
+        self.model.train()
+        loss_fn = _select_loss(self.loss_name)
+
+        ds = self.train_loader.dataset
+        pu = self._dataset_pu_labels(ds)
+        if pu is None:
+            raise RuntimeError("PULCPBF source-style phase 1 requires pu_labels.")
+        prior_labeled_ratio = float((pu == 1).mean())
+        beta = (
+            self.alpha
+            * prior_labeled_ratio
+            / (
+                self.prior
+                - self.prior * prior_labeled_ratio
+                + self.alpha * prior_labeled_ratio
+                + 1e-12
+            )
+        )
+        beta = float(min(0.99, max(self.beta_min, beta)))
+
+        p_loader = self._source_subset_loader(ds, 1)
+        u_loader = self._source_subset_loader(ds, -1)
+        p_iter, u_iter = iter(p_loader), iter(u_loader)
+        steps = self.phase1_eval_steps or max(len(p_loader), len(u_loader))
+
+        total_loss = 0.0
+        loss_x_sum = 0.0
+        loss_n_sum = 0.0
+        loss_ent_sum = 0.0
+        p_logit_sum = 0.0
+        u_logit_sum = 0.0
+        p_pos_sum = 0.0
+        u_pos_sum = 0.0
+        logit_std_sum = 0.0
+        for _ in range(steps):
+            p_batch, p_iter = self._next_batch(p_iter, p_loader)
+            u_batch, u_iter = self._next_batch(u_iter, u_loader)
+
+            x_p = self._weak_view(p_batch[0])
+            x_u = self._weak_view(u_batch[0])
+            x_p = self._ensure_channel_match(x_p).to(self.device)
+            x_u = self._ensure_channel_match(x_u).to(self.device)
+
+            batch_size = x_p.shape[0]
+            inputs = torch.cat((x_p, x_u), dim=0)
+
+            self.optimizer.zero_grad()
+            logits = torch.clamp(self.model(inputs).view(-1), -10.0, 10.0)
+            logits_p, logits_u = logits[:batch_size], logits[batch_size:]
+
+            Lx = loss_fn(logits_p).mean()
+            Lx = Lx * (1.0 - beta) * prior_labeled_ratio * self.warmup_pos_boost
+            Ln = loss_fn(-logits_u).mean()
+            Ln = Ln * beta * (1.0 - prior_labeled_ratio)
+            loss_ent = torch.tensor(0.0, device=self.device)
+            if self.phase1_co_entropy > 0:
+                loss_ent = self.phase1_co_entropy * _entropy_minimization(
+                    torch.sigmoid(logits_u)
+                )
+            prob_mean = torch.sigmoid(logits).mean()
+            loss_prior = self.prior_reg_weight * (prob_mean - float(self.prior)) ** 2
+            loss = Lx + Ln + loss_ent + loss_prior
+            loss.backward()
+            self.optimizer.step()
+            total_loss += loss.item()
+            loss_x_sum += Lx.item()
+            loss_n_sum += Ln.item()
+            loss_ent_sum += loss_ent.item()
+            with torch.no_grad():
+                p_logit_sum += logits_p.mean().item()
+                u_logit_sum += logits_u.mean().item()
+                p_pos_sum += (logits_p > 0).float().mean().item()
+                u_pos_sum += (logits_u > 0).float().mean().item()
+                logit_std_sum += logits.std(unbiased=False).item()
+
+        if self.scheduler is not None:
+            self.scheduler.step()
+
+        if self.file_console and steps > 0:
+            self.file_console.log(
+                f"Phase1[{epoch_idx}/{self.phase1_epochs}] - "
+                f"Loss: {total_loss/max(1,steps):.4f}, "
+                f"Lx: {loss_x_sum/max(1,steps):.4f}, "
+                f"Ln: {loss_n_sum/max(1,steps):.4f}, "
+                f"Ent: {loss_ent_sum/max(1,steps):.4f}, "
+                f"beta={beta:.4f}, "
+                f"p_logit={p_logit_sum/max(1,steps):.4f}, "
+                f"u_logit={u_logit_sum/max(1,steps):.4f}, "
+                f"p_pos={p_pos_sum/max(1,steps):.3f}, "
+                f"u_pos={u_pos_sum/max(1,steps):.3f}, "
+                f"logit_std={logit_std_sum/max(1,steps):.4f}, "
+                f"source_style_loaders=True, "
+                f"phase1_co_entropy={self.phase1_co_entropy:.3f}, "
+                f"LR: {self.optimizer.param_groups[0]['lr']:.6f}"
             )
 
     def _record_unlabeled_scores_for_trend(self):
@@ -432,6 +679,10 @@ class PULCPBFTrainer(BaseTrainer):
         self.criterion_u = nn.BCEWithLogitsLoss(reduction="none")
 
     def _train_epoch_phase2(self, epoch_idx: int):
+        if self.source_style_loaders:
+            self._train_epoch_phase2_source_loaders(epoch_idx)
+            return
+
         self.model.train()
         total_loss = 0.0
         num_batches = 0
@@ -445,11 +696,11 @@ class PULCPBFTrainer(BaseTrainer):
         )
         cur_T = self.T_start + (self.T_end - self.T_start) * prog
         if self.co_entropy_ramp_end > 0:
-            cur_co_entropy = self.co_entropy * min(
+            cur_co_entropy = self.phase2_co_entropy * min(
                 1.0, float(epoch_idx) / max(1, self.co_entropy_ramp_end)
             )
         else:
-            cur_co_entropy = self.co_entropy
+            cur_co_entropy = self.phase2_co_entropy
 
         for (x_w, x_s), t, y_true, idx, _ in self.train_loader:  # type: ignore
             x_w = self._ensure_channel_match(x_w)
@@ -480,9 +731,9 @@ class PULCPBFTrainer(BaseTrainer):
             if unlabeled_mask.any():
                 # Pseudo-labels: generated by stage 1 (0/1)
                 batch_u_indices = idx[unlabeled_mask].detach().cpu().numpy()
-                pseudo_binary = torch.tensor(
-                    [self.pseudo_labels_map.get(int(i), 0) for i in batch_u_indices],
-                    dtype=torch.long,
+                pseudo_stage1 = torch.tensor(
+                    [float(self.pseudo_labels_map.get(int(i), 0.0)) for i in batch_u_indices],
+                    dtype=torch.float32,
                     device=self.device,
                 )
                 logits_u_w = self.model(x_w[unlabeled_mask]).view(-1)
@@ -501,7 +752,7 @@ class PULCPBFTrainer(BaseTrainer):
                 # Mixed target follows the author phase-2 form, but targets_p
                 # is the phase-1 partition label.  Do not use oracle true labels
                 # for unlabeled examples.
-                targets_p = pseudo_binary.float()
+                targets_p = pseudo_stage1.float()
                 target_mix = (
                     lamda * pseudo_targets_u.float() + (1.0 - lamda) * targets_p
                 )
@@ -541,6 +792,97 @@ class PULCPBFTrainer(BaseTrainer):
             lr = self.optimizer.param_groups[0]["lr"] if self.optimizer else 0.0
             self.file_console.log(
                 f"Phase2[{epoch_idx}/{self.phase2_epochs}] - Total: {avg_total:.4f}, Labeled: {avg_l:.4f}, Unlabeled: {avg_u:.4f}, LR: {lr:.6f}"
+            )
+
+    def _train_epoch_phase2_source_loaders(self, epoch_idx: int):
+        if self.pseudo_labels_map is None:
+            raise RuntimeError("PULCPBF phase 2 requires pseudo_labels_map.")
+
+        self.model.train()
+        total_loss = 0.0
+        labeled_loss_sum, unlabeled_loss_sum = 0.0, 0.0
+
+        lamda = self.phase2_lamda
+        prog = float(epoch_idx) / max(1.0, float(self.phase2_epochs))
+        cur_mask_th = (
+            self.mask_threshold_start
+            + (self.mask_threshold_end - self.mask_threshold_start) * prog
+        )
+        cur_T = self.T_start + (self.T_end - self.T_start) * prog
+        if self.co_entropy_ramp_end > 0:
+            cur_co_entropy = self.phase2_co_entropy * min(
+                1.0, float(epoch_idx) / max(1, self.co_entropy_ramp_end)
+            )
+        else:
+            cur_co_entropy = self.phase2_co_entropy
+
+        ds = self.train_loader.dataset
+        p_loader = self._source_subset_loader(ds, 1)
+        u_loader = self._source_subset_loader(ds, -1)
+        p_iter, u_iter = iter(p_loader), iter(u_loader)
+        steps = self.phase2_eval_steps or max(len(p_loader), len(u_loader))
+
+        for _ in range(steps):
+            p_batch, p_iter = self._next_batch(p_iter, p_loader)
+            u_batch, u_iter = self._next_batch(u_iter, u_loader)
+
+            x_p_w, _x_p_s = self._weak_strong_views(p_batch[0])
+            x_u_w, x_u_s = self._weak_strong_views(u_batch[0])
+            y_p = p_batch[2].to(self.device).float()
+            idx_u = u_batch[3]
+
+            x_p_w = self._ensure_channel_match(x_p_w).to(self.device)
+            x_u_w = self._ensure_channel_match(x_u_w).to(self.device)
+            x_u_s = self._ensure_channel_match(x_u_s).to(self.device)
+            batch_size = x_p_w.shape[0]
+
+            inputs = torch.cat((x_p_w, x_u_w, x_u_s), dim=0)
+            logits = torch.clamp(self.model(inputs).view(-1), -10.0, 10.0)
+            logits_x = logits[:batch_size]
+            logits_u, logits_u_s = logits[batch_size:].chunk(2)
+
+            loss_l = self.criterion(logits_x, y_p)
+            with torch.no_grad():
+                p_u = torch.sigmoid(logits_u)
+                p_u2 = torch.stack([1 - p_u, p_u], dim=1)
+                pseudo_soft = p_u2 ** (1.0 / max(cur_T, 1e-6))
+                pseudo_soft = pseudo_soft / pseudo_soft.sum(dim=1, keepdim=True)
+                conf, pseudo_targets_u = torch.max(pseudo_soft, dim=1)
+                mask = (conf >= cur_mask_th).float()
+
+            batch_u_indices = idx_u.detach().cpu().numpy()
+            targets_p = torch.tensor(
+                [float(self.pseudo_labels_map.get(int(i), 0.0)) for i in batch_u_indices],
+                dtype=torch.float32,
+                device=self.device,
+            )
+            target_mix = lamda * pseudo_targets_u.float() + (1.0 - lamda) * targets_p
+            loss_u_w = self.criterion(logits_u, target_mix)
+            loss_u_s = (
+                self.criterion_u(logits_u_s, pseudo_targets_u.float()) * mask
+            ).mean()
+            loss_u = loss_u_w + loss_u_s
+
+            loss_ent = torch.tensor(0.0, device=self.device)
+            if cur_co_entropy > 0:
+                probs = torch.sigmoid(torch.cat([logits_x, logits_u, logits_u_s]))
+                loss_ent = cur_co_entropy * _entropy_minimization(probs)
+
+            loss = loss_l + self.lambda_u * loss_u + loss_ent
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+            if self.scheduler is not None:
+                self.scheduler.step()
+
+            total_loss += loss.item()
+            labeled_loss_sum += loss_l.item()
+            unlabeled_loss_sum += loss_u.item()
+
+        if self.file_console and steps > 0:
+            lr = self.optimizer.param_groups[0]["lr"] if self.optimizer else 0.0
+            self.file_console.log(
+                f"Phase2[{epoch_idx}/{self.phase2_epochs}] - Total: {total_loss/max(1,steps):.4f}, Labeled: {labeled_loss_sum/max(1,steps):.4f}, Unlabeled: {unlabeled_loss_sum/max(1,steps):.4f}, source_style_loaders=True, LR: {lr:.6f}"
             )
 
     # ---------- Bias init utility ----------
@@ -715,13 +1057,15 @@ class PULCPBFTrainer(BaseTrainer):
                 size=int(mask_change.sum()),
             )
 
-        # Binarization
-        pseudo_binary = (pseudo_scores >= 0.5).astype(int)
+        if self.alpha_range_binarize:
+            pseudo_values = (pseudo_scores >= 0.5).astype(float)
+        else:
+            pseudo_values = pseudo_scores.astype(float)
 
-        # Directly establish mapping relationship (now indices and pseudo_binary have consistent length)
+        # Directly establish mapping relationship (indices and pseudo values have consistent length)
         self.pseudo_labels_map = {}
-        for idx, pseudo_label in zip(all_unlabeled_indices.numpy(), pseudo_binary):
-            self.pseudo_labels_map[int(idx)] = int(pseudo_label)
+        for idx, pseudo_label in zip(all_unlabeled_indices.numpy(), pseudo_values):
+            self.pseudo_labels_map[int(idx)] = float(pseudo_label)
 
     # ---------------- Phase-2 Data Wrapping ----------------
     def _make_image_train_wrapper(self, base_dataset):
@@ -767,9 +1111,7 @@ class PULCPBFTrainer(BaseTrainer):
             self._make_image_train_wrapper(base_dataset),
             batch_size=self.batch_size,
             shuffle=True,
-            num_workers=self.params.get("num_workers", 4),
-            pin_memory=True,
-            worker_init_fn=seed_worker,
+            **self._dataloader_worker_kwargs(),
         )
         if self.validation_loader is not None and self._is_image_dataset(
             self.validation_loader.dataset
@@ -778,9 +1120,7 @@ class PULCPBFTrainer(BaseTrainer):
                 self._make_image_eval_wrapper(self.validation_loader.dataset),
                 batch_size=self.params.get("batch_size", 128),
                 shuffle=False,
-                num_workers=self.params.get("num_workers", 4),
-                pin_memory=True,
-                worker_init_fn=seed_worker,
+                **self._dataloader_worker_kwargs(),
             )
         if self.test_loader is not None and self._is_image_dataset(
             self.test_loader.dataset
@@ -789,9 +1129,7 @@ class PULCPBFTrainer(BaseTrainer):
                 self._make_image_eval_wrapper(self.test_loader.dataset),
                 batch_size=self.params.get("batch_size", 128),
                 shuffle=False,
-                num_workers=self.params.get("num_workers", 4),
-                pin_memory=True,
-                worker_init_fn=seed_worker,
+                **self._dataloader_worker_kwargs(),
             )
 
     def _ensure_phase2_train_dataset(self):
@@ -824,7 +1162,5 @@ class PULCPBFTrainer(BaseTrainer):
             wrapped,
             batch_size=self.batch_size,
             shuffle=True,
-            num_workers=self.params.get("num_workers", 4),
-            pin_memory=True,
-            worker_init_fn=seed_worker,
+            **self._dataloader_worker_kwargs(),
         )

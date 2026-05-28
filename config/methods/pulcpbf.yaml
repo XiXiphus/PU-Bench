@@ -7,28 +7,35 @@ pulcpbf:
       source_reproduction: false
       claim_note: >-
         Not an author training-script reproduction: the image workflow keeps
-        PUL-CPBF's two-stage warmup, pseudo-label, and weak/strong consistency
-        recipe, while PU-Bench runs controlled dataset splits, public backbones,
-        benchmark checkpoints/proxy metrics, and a benchmark-specific
-        vector/tabular weak/strong extension.
+        PUL-CPBF's two-stage warmup, source-style P/U loaders, alpha-range
+        pseudo-label, and weak/strong consistency recipe, while PU-Bench runs
+        controlled dataset splits, shared public backbones, benchmark
+        checkpoints/proxy metrics, and a benchmark-specific vector/tabular
+        weak/strong extension.
       source_references:
         - "author-provided PUL-CPBF source archive used for PU-Bench alignment"
       retained_source_components:
         - "phase-1 warmup PU surrogate with asymmetric beta weighting"
-        - "trend and alpha_range pseudo-label generation"
+        - "alpha_range pseudo-label generation by default; trend remains available for the source creditcard-style path"
         - "phase-2 mixed target from current model pseudo-labels and phase-1 pseudo-labels"
+        - "source-style phase-2 model reinitialization after pseudo-label generation"
+        - "optional source LeNet backbone on MNIST/FashionMNIST for explicit reproduction diagnostics"
         - "weak/strong image augmentation recipe"
         - "unlabeled phase-2 targets do not use oracle true labels"
       benchmark_adaptations:
-        - "PU-Bench public backbone and controlled dataset splits"
+        - "PU-Bench controlled dataset splits"
+        - "shared PU-Bench public backbones by default for fair cross-method comparison"
         - "PU-Bench loaders, checkpoints, proxy metrics, and result schema"
         - "benchmark-specific weak/strong augmentation for vector and tabular datasets"
       modality_alignment:
         image: "source_aligned_recipe_with_controlled_backbone"
         vector_tabular: "benchmark_specific_extension"
-  # Dataset/model come from the dataset config. Do not pin a CIFAR backbone here;
-  # PU-Bench selects the public backbone for each dataset_class.
-  # Source-aligned image workflow under PU-Bench controlled splits/backbones;
+  # Dataset comes from the dataset config. The benchmark default uses PU-Bench
+  # public backbones for fair cross-method comparison. Use private or
+  # source_available only for explicit source-reproduction diagnostics.
+  backbone_policy: "controlled" # controlled | private | source_available
+  private_backbone_arch: "auto"
+  # Source-aligned image workflow under PU-Bench controlled splits;
   # vector/tabular datasets use a benchmark-specific weak/strong extension.
 
   # Optimization
@@ -38,23 +45,39 @@ pulcpbf:
   nesterov: true
   batch_size: 64
   num_epochs: 50 # used as phase2_epochs if not specified
-  num_workers: 4
+  num_workers: 12
+  persistent_workers: true
+  prefetch_factor: 4
 
   # Phase-1 (warming-up)
-  phase1_epochs: 20
+  phase1_epochs: 50
+  phase1_eval_steps: 512
+  source_style_loaders: true
   loss: logistic # logistic | sigmoid
   alpha: 0.5 # asymmetric penalty in warmup (beta depends on this and prior_)
-  co_entropy: 0.0 # entropy minimization coefficient in phase-1
+  co_entropy: 0.0 # legacy fallback; phase-specific values are used below
+  phase1_co_entropy: 0.01 # source warmup.py default when run.sh does not override it
+  # The author warmup.py has an active StepLR(gamma=0.25), but on PU-Bench
+  # splits it freezes lr to ~0 after a few epochs and locks warmup into an
+  # all-negative model. Keep the source loss/budget/loaders, but do not decay
+  # phase-1 lr by default.
+  phase1_scheduler: none
+  phase1_step_size: 1
+  phase1_step_gamma: 0.25
 
   # Pseudo-label generation
-  pseudo_label_strategy: trend # trend | alpha_range
+  pseudo_label_strategy: alpha_range # trend | alpha_range
   alpha_list: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+  alpha_range_binarize: false # source pseudo_labeling returns continuous stochastic scores
   use_three_sigma: false
 
   # Phase-2 (fine-tuning)
-  phase2_epochs: 50
+  phase2_epochs: 25
+  phase2_eval_steps: 512
+  phase2_reinitialize_model: true
   phase2_optimizer: adam
   phase2_lamda: 0.5 # source train.py uses lamda=0.5
+  phase2_co_entropy: 0.0
   T: 0.5 # temperature for pseudo-label sharpening
   mask_threshold: 0.9 # confidence threshold for strong branch
   lambda_u: 0.85 # weight for unlabeled consistency loss (matches original)
