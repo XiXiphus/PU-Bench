@@ -2,6 +2,34 @@ pulda:
   metadata:
     method_key: "pulda"
     trainer_key: "pulda"
+    alignment:
+      level: "source_faithful_kernel_benchmark_wrapper"
+      source_reproduction: false
+      claim_note: >-
+        Not an author training-script reproduction: PU-Bench keeps PULDA's
+        label-distribution alignment, EMA, two-way sigmoid, P/U resampling,
+        and mixup training kernel, but runs it through controlled dataset
+        splits, shared public backbones, checkpointing, proxy metrics, and
+        result schemas.
+      source_references:
+        - "https://github.com/jiangyangby/PULDA/tree/7b3dcad95bd7caa0a9477af37a05764fbe6e27bc"
+      retained_source_components:
+        - "warm-up stage with label-distribution alignment and two-way sigmoid loss"
+        - "EMA estimates for unlabeled expectation and negative-class margin terms"
+        - "fixed P/U resampling batches with P_batch_size=16 and U_batch_size=128"
+        - "mixup stage initialized from source-style pseudo scores"
+        - "source coefficients co_mixup=4.2, alpha=11.0, tmpr=3.5, alpha_U=0.85, and alpha_CN=0.5"
+        - "source train/test batch sizes and eight-worker loader default"
+        - "no prior-bias initialization"
+      benchmark_adaptations:
+        - "PU-Bench controlled dataset splits with shared public backbones"
+        - "PU-Bench empirical pi_unlabeled prior from dataset metadata"
+        - "PU-Bench checkpointing, proxy metrics, and result schema"
+        - "validation monitor val_proxy_acc instead of source-script test accuracy logging"
+        - "benchmark dataset object contract instead of author CIFAR-only dataset factory"
+      modality_alignment:
+        image: "source_aligned_recipe_with_controlled_backbone"
+        vector_tabular: "benchmark_specific_extension"
   # Source-aligned trainer with PU-Bench controlled public backbones.
   # Official code: jiangyangby/PULDA @ 7b3dcad95bd7caa0a9477af37a05764fbe6e27bc.
   # Optimizer settings (alignment stage)
@@ -9,6 +37,9 @@ pulda:
   lr: 0.001 # Alignment stage learning rate
   weight_decay: 0.0001 # Alignment stage weight decay (original ~1e-4)
   batch_size: 256 # Original paper uses 256 (can reduce for memory constraints)
+  test_batch_size: 128
+  num_workers: 8
+  pin_memory: true
   num_epochs: 120 # Total epochs (warm-up + alignment), original ~60+60
   seed: 42
 

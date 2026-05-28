@@ -181,6 +181,26 @@ class TestMethodMetadataInvariants(unittest.TestCase):
             alignment["retained_source_components"],
         )
 
+    def test_pulda_alignment_metadata_is_structured(self) -> None:
+        config = load_method_config("pulda")
+
+        alignment = config.metadata["alignment"]
+        self.assertEqual(
+            alignment["level"],
+            "source_faithful_kernel_benchmark_wrapper",
+        )
+        self.assertFalse(alignment["source_reproduction"])
+        self.assertIn(
+            "fixed P/U resampling batches with P_batch_size=16 and U_batch_size=128",
+            alignment["retained_source_components"],
+        )
+        self.assertIn(
+            "PU-Bench controlled dataset splits with shared public backbones",
+            alignment["benchmark_adaptations"],
+        )
+        self.assertEqual(config.params["checkpoint"]["monitor"], "val_proxy_acc")
+        self.assertFalse(config.params["checkpoint"]["early_stopping"]["enabled"])
+
     def test_vpu_alignment_metadata_is_structured(self) -> None:
         config = load_method_config("vpu")
 

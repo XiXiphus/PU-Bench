@@ -75,7 +75,34 @@ class PULDATrainer(BaseTrainer):
 
         if int(self.params.get("resample", 1)) == 1:
             self._install_source_resampling_loader()
+        else:
+            self.train_loader = self._make_loader(
+                self.train_loader.dataset,
+                batch_size=int(self.params.get("batch_size", 256)),
+                shuffle=True,
+            )
+        self._align_source_eval_update_loaders()
         self._assert_pseudo_label_index_space()
+
+        if self.file_console:
+            self.file_console.log("PULDA source alignment:")
+            self.file_console.log(
+                "  source=jiangyangby/PULDA@7b3dcad95bd7caa0a9477af37a05764fbe6e27bc"
+            )
+            self.file_console.log(
+                f"  model={self.model.__class__.__name__}, "
+                f"params={sum(p.numel() for p in self.model.parameters()) / 1e6:.3f}M, "
+                "backbone=shared_public"
+            )
+            self.file_console.log(
+                f"  batch_size={self.params.get('batch_size', 256)}, "
+                f"test_batch_size={self.params.get('test_batch_size', 128)}, "
+                f"num_workers={self.params.get('num_workers', 0)}, "
+                f"pin_memory={self.params.get('pin_memory', torch.cuda.is_available())}, "
+                f"resample={self.params.get('resample', 1)}, "
+                f"P_batch_size={self.params.get('P_batch_size', 16)}, "
+                f"U_batch_size={self.params.get('U_batch_size', 128)}"
+            )
 
     def create_criterion(self):
         return torch.nn.Identity()
@@ -188,10 +215,50 @@ class PULDATrainer(BaseTrainer):
         self.train_loader = DataLoader(
             base_ds,
             batch_sampler=sampler,
-            num_workers=int(self.params.get("num_workers", 0)),
-            pin_memory=torch.cuda.is_available(),
-            worker_init_fn=seed_worker,
+            **self._loader_worker_kwargs(),
         )
+
+    def _loader_worker_kwargs(self) -> dict:
+        num_workers = int(self.params.get("num_workers", 0))
+        pin_memory = bool(self.params.get("pin_memory", torch.cuda.is_available()))
+        kwargs = {
+            "num_workers": num_workers,
+            "pin_memory": pin_memory,
+            "worker_init_fn": seed_worker,
+        }
+        if num_workers > 0 and "persistent_workers" in self.params:
+            kwargs["persistent_workers"] = bool(self.params["persistent_workers"])
+        if num_workers > 0 and "prefetch_factor" in self.params:
+            kwargs["prefetch_factor"] = int(self.params["prefetch_factor"])
+        return kwargs
+
+    def _make_loader(self, dataset, *, batch_size: int, shuffle: bool) -> DataLoader:
+        return DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            **self._loader_worker_kwargs(),
+        )
+
+    def _align_source_eval_update_loaders(self) -> None:
+        eval_batch = int(self.params.get("test_batch_size", 128))
+        if self.validation_loader is not None:
+            self.validation_loader = self._make_loader(
+                self.validation_loader.dataset,
+                batch_size=eval_batch,
+                shuffle=False,
+            )
+        self.test_loader = self._make_loader(
+            self.test_loader.dataset,
+            batch_size=eval_batch,
+            shuffle=False,
+        )
+        if self.update_loader is not None:
+            self.update_loader = self._make_loader(
+                self.update_loader.dataset,
+                batch_size=eval_batch,
+                shuffle=False,
+            )
 
     def _assert_pseudo_label_index_space(self) -> None:
         if self.update_loader is None:

@@ -133,6 +133,49 @@ class DistPUTrainer(BaseTrainer):
                 self.mixup_dataset.psudo_labels[idx_cpu] = scores_orig.detach().cpu()
         self.scheduler.step()
 
+    def _loader_worker_kwargs(self) -> dict[str, Any]:
+        num_workers = int(self.params.get("num_workers", 0))
+        pin_memory = bool(self.params.get("pin_memory", torch.cuda.is_available()))
+        kwargs: dict[str, Any] = {
+            "num_workers": num_workers,
+            "pin_memory": pin_memory,
+            "worker_init_fn": seed_worker,
+        }
+        if num_workers > 0 and "persistent_workers" in self.params:
+            kwargs["persistent_workers"] = bool(self.params["persistent_workers"])
+        if num_workers > 0 and "prefetch_factor" in self.params:
+            kwargs["prefetch_factor"] = int(self.params["prefetch_factor"])
+        return kwargs
+
+    def _make_loader(self, dataset, *, batch_size: int, shuffle: bool) -> DataLoader:
+        return DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            **self._loader_worker_kwargs(),
+        )
+
+    def _align_source_loader_contract(self) -> None:
+        """Use the Dist-PU source batch contract without changing datasets."""
+        train_batch = int(self.params.get("batch_size", 256))
+        eval_batch = int(self.params.get("test_batch_size", 128))
+        self.train_loader = self._make_loader(
+            self.train_loader.dataset,
+            batch_size=train_batch,
+            shuffle=True,
+        )
+        if self.validation_loader is not None:
+            self.validation_loader = self._make_loader(
+                self.validation_loader.dataset,
+                batch_size=eval_batch,
+                shuffle=False,
+            )
+        self.test_loader = self._make_loader(
+            self.test_loader.dataset,
+            batch_size=eval_batch,
+            shuffle=False,
+        )
+
     # Multi-stage control
     def before_training(self):
         # First call parent's initialization (including file console)
@@ -142,6 +185,7 @@ class DistPUTrainer(BaseTrainer):
             raise ValueError("DistPU requires `stages` configuration in params.")
         self.warm_up_cfg = self.params["stages"].get("warm_up", {})
         self.mixup_cfg = self.params["stages"].get("mixup", {})
+        self._align_source_loader_contract()
         if (
             self.checkpoint_handler is not None
             and str(getattr(self.checkpoint_handler, "monitor", "")).startswith("val_")
@@ -161,6 +205,17 @@ class DistPUTrainer(BaseTrainer):
             self.file_console.log("Dist-PU source alignment:")
             self.file_console.log(
                 "  source=Ray-rui/Dist-PU@cb74be1a87176fd38270873c06374e53905b7354"
+            )
+            self.file_console.log(
+                f"  model={self.model.__class__.__name__}, "
+                f"params={sum(p.numel() for p in self.model.parameters()) / 1e6:.3f}M, "
+                "backbone=shared_public"
+            )
+            self.file_console.log(
+                f"  batch_size={self.params.get('batch_size', 256)}, "
+                f"test_batch_size={self.params.get('test_batch_size', 128)}, "
+                f"num_workers={self.params.get('num_workers', 0)}, "
+                f"pin_memory={self.params.get('pin_memory', torch.cuda.is_available())}"
             )
             self.file_console.log(
                 f"Warm-up epochs: {self.warm_up_cfg.get('epochs', 0)}"
@@ -206,13 +261,10 @@ class DistPUTrainer(BaseTrainer):
         self.reset_checkpoint_tracking()
 
     def _make_sequential_train_loader(self) -> DataLoader:
-        return DataLoader(
+        return self._make_loader(
             self.train_loader.dataset,
             batch_size=int(self.params.get("test_batch_size", 128)),
             shuffle=False,
-            num_workers=int(self.params.get("num_workers", 0)),
-            pin_memory=torch.cuda.is_available(),
-            worker_init_fn=seed_worker,
         )
 
     # Override run() to implement multi-stage training workflow

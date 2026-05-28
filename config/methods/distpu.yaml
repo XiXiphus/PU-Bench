@@ -8,8 +8,8 @@ distpu:
       claim_note: >-
         Not an author training-script reproduction: PU-Bench keeps Dist-PU's
         two-stage label-distribution and mixup training kernel, but runs it
-        through benchmark dataset splits, public backbones, checkpointing,
-        proxy metrics, and result schemas.
+        through benchmark dataset splits, shared public backbones,
+        checkpointing, proxy metrics, and result schemas.
       source_references:
         - "https://github.com/Ray-rui/Dist-PU-Positive-Unlabeled-Learning-from-a-Label-Distribution-Perspective/tree/cb74be1a87176fd38270873c06374e53905b7354"
       retained_source_components:
@@ -19,13 +19,14 @@ distpu:
         - "source coefficients co_mu, co_entropy, co_mix_entropy, co_mixup, and alpha"
         - "cosine annealing schedules for warm-up and mixup stages"
         - "mixup-stage pseudo-label refresh from model scores"
+        - "source train/test batch sizes and eight-worker loader default"
         - "no prior-bias initialization"
       benchmark_adaptations:
-        - "PU-Bench public backbone and controlled dataset splits"
+        - "PU-Bench controlled dataset splits with shared public backbones"
         - "PU-Bench empirical pi_unlabeled prior from dataset metadata"
         - "PU-Bench checkpointing, proxy metrics, and result schema"
         - "validation monitor val_proxy_acc instead of source-script test accuracy logging"
-        - "benchmark loader contract instead of author CIFAR/FashionMNIST/Alzheimer dataset factory"
+        - "benchmark dataset object contract instead of author CIFAR/FashionMNIST/Alzheimer dataset factory"
   # Source-aligned Dist-PU package: train/distpu/.
   # Author source file(s): distpu at cb74be1a87176fd38270873c06374e53905b7354.
   optimizer: "adam"
@@ -33,6 +34,8 @@ distpu:
   weight_decay: 0.001
   batch_size: 256
   test_batch_size: 128
+  num_workers: 8
+  pin_memory: true
   seed: 42
   checkpoint:
     enabled: true
