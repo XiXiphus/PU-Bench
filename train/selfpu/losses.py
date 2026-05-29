@@ -8,12 +8,72 @@ import torch
 import torch.nn.functional as F
 
 
-def sigmoid_entropy_loss(logits: torch.Tensor) -> torch.Tensor:
-    """Entropy minimization used by the source ``--soft-label`` clean branch."""
+def sigmoid_loss(logits: torch.Tensor) -> torch.Tensor:
+    """Source Self-PU sigmoid loss: 1 / (1 + exp(logit))."""
+
+    return torch.sigmoid(-logits)
+
+
+def source_nnpu_loss(
+    logits: torch.Tensor,
+    pu_labels: torch.Tensor,
+    prior: float,
+    *,
+    beta: float = 0.0,
+    gamma: float = 1.0,
+    sample_weight: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Noisy-branch nnPU scalar used by the Self-PU source.
+
+    The source ``PULoss`` returns a tuple and the training loop optimizes the
+    second value.  In the negative-risk branch that value is ``-gamma * R_n``;
+    this scalar is also used by Self-PU's mutual-consistency gate.  The
+    ``sample_weight`` path is the source ``sigmoid_eps`` variant used by
+    ``train_2s2t_mix.py`` self-calibration.
+    """
+
+    logits = logits.view(-1)
+    labels = pu_labels.view(-1)
+    if sample_weight is None:
+        weights = torch.ones_like(logits)
+    else:
+        weights = sample_weight.to(device=logits.device, dtype=logits.dtype).view(-1)
+        if weights.shape[0] != logits.shape[0]:
+            raise ValueError(
+                "Self-PU sample weights must match logits; "
+                f"got {tuple(weights.shape)} and {tuple(logits.shape)}."
+            )
+    positive = labels == 1
+    unlabeled = labels == -1
+    n_positive = max(1, int(positive.sum().item()))
+    n_unlabeled = max(1, int(unlabeled.sum().item()))
+
+    y_positive = sigmoid_loss(logits) * weights
+    y_unlabeled = sigmoid_loss(-logits) * weights
+    positive_risk = (
+        float(prior) * y_positive[positive].sum() / float(n_positive)
+    )
+    negative_risk = (
+        y_unlabeled[unlabeled].sum() / float(n_unlabeled)
+        - float(prior) * y_unlabeled[positive].sum() / float(n_positive)
+    )
+    if negative_risk < -float(beta):
+        return -float(gamma) * negative_risk
+    return positive_risk + negative_risk
+
+
+def sigmoid_entropy_values(logits: torch.Tensor) -> torch.Tensor:
+    """Per-sample binary entropy used by Self-PU clean/meta branches."""
 
     probs_pos = torch.sigmoid(logits.view(-1))
     probs = torch.stack((1.0 - probs_pos, probs_pos), dim=1)
-    return -(probs * torch.log(probs + 1e-10)).sum(dim=1).mean()
+    return -(probs * torch.log(probs + 1e-10)).sum(dim=1)
+
+
+def sigmoid_entropy_loss(logits: torch.Tensor) -> torch.Tensor:
+    """Entropy minimization used by the source ``--soft-label`` clean branch."""
+
+    return sigmoid_entropy_values(logits).mean()
 
 
 def signed_binary_ce(logits: torch.Tensor, signed_labels: torch.Tensor) -> torch.Tensor:

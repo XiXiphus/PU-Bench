@@ -2,16 +2,48 @@ selfpu:
   metadata:
     method_key: "selfpu"
     trainer_key: "selfpu"
-  # Controlled PU-Bench entry for VITA-Group/Self-PU train_2s2t.py.
-  # Source default is 200 epochs; this benchmark default keeps the source phase
-  # order but shortens the run for cross-dataset sweeps.
+    alignment:
+      level: "source_faithful_self_calibrated_2s2t_benchmark_wrapper"
+      source_reproduction: false
+      claim_note: >-
+        Not a full author training-script reproduction: PU-Bench keeps the
+        source train_2s2t_mix.py two-student/two-teacher Self-PU kernel with
+        self-calibrated noisy-batch reweighting, but runs it through benchmark
+        dataset splits, shared public backbones, checkpointing, proxy metrics,
+        and result schemas. The source's transductive test-loader meta target is
+        replaced by train/validation unlabeled inputs only.
+      source_references:
+        - "https://github.com/VITA-Group/Self-PU/tree/a0e332ae4f8110e2490d597876e36bf837e1060f"
+      retained_source_components:
+        - "two-student/two-teacher train_2s2t_mix.py training loop"
+        - "self-calibrated sigmoid_eps noisy-batch reweighting"
+        - "source Adam defaults lr=5e-4 and weight_decay=5e-3"
+        - "source 200 epoch training budget"
+        - "self-paced clean/noisy split updates from epoch 10 through 49"
+        - "mean-teacher switch at epoch 50 with EMA decay 0.999"
+        - "source nnPU negative-risk training scalar for noisy branches"
+        - "source self-calibration inner step lr=0.001 and gamma budget=1/16"
+        - "source train batch size and four-worker pinned loader default"
+        - "no prior-bias initialization"
+      benchmark_adaptations:
+        - "PU-Bench controlled dataset splits with shared public backbones"
+        - "PU-Bench empirical pi_unlabeled prior from dataset metadata"
+        - "self-calibration meta target uses train/validation unlabeled inputs only, never test inputs"
+        - "PU-Bench checkpointing, proxy metrics, and result schema"
+        - "validation monitor val_proxy_acc instead of source-script test accuracy model selection"
+        - "benchmark dataset object contract instead of author MNIST/CIFAR-only dataset factory"
+  # Controlled PU-Bench entry for VITA-Group/Self-PU train_2s2t_mix.py.
+  # The source meta target uses test inputs; PU-Bench replaces that with
+  # validation/train unlabeled inputs to avoid transductive test-input leakage.
   init_bias_from_prior: false
 
   optimizer: "adam"
   lr: 0.0005
   weight_decay: 0.005
   batch_size: 256
-  num_epochs: 80
+  num_epochs: 200
+  num_workers: 4
+  pin_memory: true
   seed: 42
   loss: "sigmoid"
   gamma: 1.0
@@ -34,6 +66,11 @@ selfpu:
   flex_ratio: 0.0
 
   pu_loss_weight: 1.0
+  self_calibration_enabled: true
+  self_calibration_inner_lr: 0.001
+  self_calibration_gamma: 0.0625
+  self_calibration_meta_source: "val_unlabeled"
+  self_calibration_entropy_weight: 1.0
 
   mean_teacher_enabled: true
   mean_teacher_start: 50
@@ -54,6 +91,6 @@ selfpu:
     monitor: "val_proxy_acc"
     mode: "max"
     early_stopping:
-      enabled: true
+      enabled: false
       patience: 20
       min_delta: 0.0001

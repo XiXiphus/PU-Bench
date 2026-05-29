@@ -201,6 +201,43 @@ class TestMethodMetadataInvariants(unittest.TestCase):
         self.assertEqual(config.params["checkpoint"]["monitor"], "val_proxy_acc")
         self.assertFalse(config.params["checkpoint"]["early_stopping"]["enabled"])
 
+    def test_selfpu_alignment_metadata_is_structured(self) -> None:
+        config = load_method_config("selfpu")
+
+        alignment = config.metadata["alignment"]
+        self.assertEqual(
+            alignment["level"],
+            "source_faithful_self_calibrated_2s2t_benchmark_wrapper",
+        )
+        self.assertFalse(alignment["source_reproduction"])
+        self.assertIn(
+            "source 200 epoch training budget",
+            alignment["retained_source_components"],
+        )
+        self.assertIn(
+            "self-calibrated sigmoid_eps noisy-batch reweighting",
+            alignment["retained_source_components"],
+        )
+        self.assertIn(
+            "source nnPU negative-risk training scalar for noisy branches",
+            alignment["retained_source_components"],
+        )
+        self.assertIn(
+            "PU-Bench controlled dataset splits with shared public backbones",
+            alignment["benchmark_adaptations"],
+        )
+        self.assertIn(
+            "self-calibration meta target uses train/validation unlabeled inputs only, never test inputs",
+            alignment["benchmark_adaptations"],
+        )
+        self.assertEqual(config.params["num_epochs"], 200)
+        self.assertEqual(config.params["num_workers"], 4)
+        self.assertTrue(config.params["self_calibration_enabled"])
+        self.assertEqual(config.params["self_calibration_meta_source"], "val_unlabeled")
+        self.assertEqual(config.params["self_calibration_gamma"], 0.0625)
+        self.assertEqual(config.params["checkpoint"]["monitor"], "val_proxy_acc")
+        self.assertFalse(config.params["checkpoint"]["early_stopping"]["enabled"])
+
     def test_vpu_alignment_metadata_is_structured(self) -> None:
         config = load_method_config("vpu")
 

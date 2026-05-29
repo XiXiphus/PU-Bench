@@ -13,7 +13,8 @@ class EMATeacher:
 
     Self-PU copies the student into the teacher when the mean-teacher phase
     starts, then updates teacher parameters with
-    ``alpha = min(1 - 1 / (step + 1), ema_decay)``.
+    ``alpha = min(1 - 1 / (step + 1), ema_decay)``.  Source code updates
+    parameters only; buffers follow the teacher model's own forward passes.
     """
 
     def __init__(self, model: nn.Module, device: torch.device | str):
@@ -31,12 +32,12 @@ class EMATeacher:
     @torch.no_grad()
     def update(self, student: nn.Module, decay: float) -> None:
         alpha = min(1.0 - 1.0 / float(self.step + 1), float(decay))
-        teacher_state = self.model.state_dict()
-        student_state = student.state_dict()
-        for name, teacher_value in teacher_state.items():
-            student_value = student_state[name].detach()
-            if torch.is_floating_point(teacher_value):
-                teacher_value.mul_(alpha).add_(student_value, alpha=1.0 - alpha)
-            else:
-                teacher_value.copy_(student_value)
+        for teacher_param, student_param in zip(
+            self.model.parameters(),
+            student.parameters(),
+        ):
+            teacher_param.data.mul_(alpha).add_(
+                student_param.data,
+                alpha=1.0 - alpha,
+            )
         self.step += 1

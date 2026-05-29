@@ -2,19 +2,22 @@
 
 Primary source:
     VITA-Group/Self-PU at audited snapshot
-    a0e332ae4f8110e2490d597876e36bf837e1060f, especially ``train_2s2t.py``,
-    ``datasets.py``, ``cifar_datasets.py`` and ``mean_teacher/ramps.py``.
+    a0e332ae4f8110e2490d597876e36bf837e1060f, especially
+    ``train_2s2t_mix.py``, ``train_2s2t.py``, ``datasets.py``,
+    ``cifar_datasets.py`` and ``mean_teacher/ramps.py``.
 
 Source facts preserved here:
     - PU labels are +1 for labeled positives and -1 for unlabeled examples.
     - The benchmark entry implements the source's two-student/two-teacher
-      Self-PU variant without the expensive self-calibration path from
-      ``train_2s2t_mix.py``.
+      Self-PU variant with the ``train_2s2t_mix.py`` self-calibration path.
     - Noisy splits are trained with nnPU. Clean self-paced splits are selected
       only from U using high/low model scores, then trained with the source
       entropy-minimization ``--soft-label`` branch by default.
     - Mean-teacher EMA starts only after the configured epoch; teachers are
       copied from students at the switch point before EMA updates begin.
+    - Self-calibration uses only train/validation unlabeled inputs as the meta
+      target in PU-Bench; the source's transductive test-loader target is not
+      used.
 
 Benchmark boundary:
     This is the controlled-backbone PU-Bench entry. The source paper's dataset
@@ -32,17 +35,19 @@ from typing import Any
 
 import numpy as np
 import torch
+from torch.func import functional_call
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 
 from ..base_trainer import BaseTrainer
 from ..metrics import evaluate_metrics, evaluate_proxy_metrics
 from ..model_factory import select_model
-from ..common.pu_risk import PULoss
 from ..reproducibility import seed_worker
 from .ema import EMATeacher
 from .losses import (
     mutual_student_consistency,
+    source_nnpu_loss,
+    sigmoid_entropy_values,
     sigmoid_entropy_loss,
     sigmoid_rampup,
     softmax_mse_consistency,
@@ -80,6 +85,13 @@ class SelfPUConfig:
     mutual_alpha: float
     soft_label: bool
     pu_loss_weight: float
+    num_workers: int
+    pin_memory: bool
+    self_calibration_enabled: bool
+    self_calibration_inner_lr: float
+    self_calibration_gamma: float
+    self_calibration_meta_source: str
+    self_calibration_entropy_weight: float
 
 
 class SelfPUTrainer(BaseTrainer):
@@ -89,6 +101,10 @@ class SelfPUTrainer(BaseTrainer):
         super().__init__(method, experiment, params)
         self.selfpu_cfg = self._parse_selfpu_config()
         self._validate_source_data_contract()
+        self._align_source_loader_contract()
+        self._validate_self_calibration_contract()
+        self._meta_target_loader = self._select_meta_target_loader()
+        self._meta_target_iter = iter(self._meta_target_loader)
         self._rng = np.random.default_rng(int(self.params.get("seed", 42)))
         self.selector = SelfPUSelector(
             self.train_loader.dataset,
@@ -118,14 +134,8 @@ class SelfPUTrainer(BaseTrainer):
         self._last_completed_epoch: int | None = None
         self._last_report_model_name: str | None = None
         self._last_report_model: torch.nn.Module | None = None
+        self._self_calibration_logged = False
 
-        self.criterion_unlabeled = PULoss(
-            self.prior,
-            loss=str(self.params.get("loss", "sigmoid")),
-            nnpu=True,
-            gamma=float(self.params.get("gamma", 1.0)),
-            beta=float(self.params.get("beta", 0.0)),
-        )
         self.state1 = self._empty_selection_state()
         self.state2 = self._empty_selection_state()
         self.clean_loader1 = None
@@ -160,6 +170,23 @@ class SelfPUTrainer(BaseTrainer):
             mutual_alpha=float(self.params.get("mutual_alpha", 0.1)),
             soft_label=bool(self.params.get("soft_label", True)),
             pu_loss_weight=float(self.params.get("pu_loss_weight", 1.0)),
+            num_workers=int(self.params.get("num_workers", 4)),
+            pin_memory=bool(self.params.get("pin_memory", torch.cuda.is_available())),
+            self_calibration_enabled=bool(
+                self.params.get("self_calibration_enabled", True)
+            ),
+            self_calibration_inner_lr=float(
+                self.params.get("self_calibration_inner_lr", 0.001)
+            ),
+            self_calibration_gamma=float(
+                self.params.get("self_calibration_gamma", 1.0 / 16.0)
+            ),
+            self_calibration_meta_source=str(
+                self.params.get("self_calibration_meta_source", "val_unlabeled")
+            ),
+            self_calibration_entropy_weight=float(
+                self.params.get("self_calibration_entropy_weight", 1.0)
+            ),
         )
 
     def _validate_source_data_contract(self) -> None:
@@ -174,6 +201,14 @@ class SelfPUTrainer(BaseTrainer):
             raise ValueError(
                 "Self-PU requires PU labels +1 for positives and -1 for "
                 f"unlabeled examples; observed {sorted(labels)}."
+            )
+
+    def _validate_self_calibration_contract(self) -> None:
+        source = self.selfpu_cfg.self_calibration_meta_source.lower()
+        if "test" in source:
+            raise ValueError(
+                "Self-PU self-calibration cannot use test inputs in PU-Bench. "
+                "Use 'val_unlabeled' or 'train_unlabeled'."
             )
 
     def _build_second_student(self) -> torch.nn.Module:
@@ -213,8 +248,44 @@ class SelfPUTrainer(BaseTrainer):
             batch_size=self.selfpu_cfg.batch_size,
             shuffle=shuffle,
             drop_last=drop_last and len(dataset) >= self.selfpu_cfg.batch_size,
+            num_workers=self.selfpu_cfg.num_workers,
+            pin_memory=self.selfpu_cfg.pin_memory,
             worker_init_fn=seed_worker,
         )
+
+    def _align_source_loader_contract(self) -> None:
+        self.train_loader = self._make_loader(
+            self.train_loader.dataset,
+            shuffle=True,
+        )
+        if self.validation_loader is not None:
+            self.validation_loader = self._make_loader(
+                self.validation_loader.dataset,
+                shuffle=False,
+            )
+        self.test_loader = self._make_loader(
+            self.test_loader.dataset,
+            shuffle=False,
+        )
+        if self.update_loader is not None:
+            self.update_loader = self._make_loader(
+                self.update_loader.dataset,
+                shuffle=False,
+            )
+
+    def _select_meta_target_loader(self) -> DataLoader:
+        """Choose the legal train/validation unlabeled source for calibration.
+
+        The source ``train_2s2t_mix.py`` cycles over ``dataloader_test`` for the
+        meta target.  PU-Bench forbids that transductive test-input use, so this
+        controlled entry uses validation U when available and otherwise falls
+        back to train U.
+        """
+
+        source = self.selfpu_cfg.self_calibration_meta_source.lower()
+        if source.startswith("train") or self.validation_loader is None:
+            return self.train_loader
+        return self.validation_loader
 
     def _make_clean_loader(self, state: SelectionState):
         if len(state.clean_indices) == 0:
@@ -235,10 +306,13 @@ class SelfPUTrainer(BaseTrainer):
         return self._make_loader(noisy_dataset, shuffle=False, drop_last=False)
 
     def train_one_epoch(self, epoch_idx: int):
-        self._maybe_start_mean_teacher(epoch_idx)
+        source_epoch = self._source_epoch(epoch_idx)
+        self._maybe_start_mean_teacher(source_epoch)
         self.model.train()
         self.model2.train()
-        self._step_schedulers_source_order(epoch_idx)
+        self.teacher1.model.train()
+        self.teacher2.model.train()
+        self._step_schedulers_source_order(source_epoch)
         self._epoch_stats = {
             "selfpu_clean1": float(len(self.state1.clean_indices)),
             "selfpu_clean2": float(len(self.state2.clean_indices)),
@@ -251,24 +325,25 @@ class SelfPUTrainer(BaseTrainer):
             teacher=self.teacher1,
             optimizer=self.optimizer,
             loader=self.clean_loader1,
-            epoch_idx=epoch_idx,
+            epoch_idx=source_epoch,
         )
         clean_loss2 = self._run_clean_branch(
             model=self.model2,
             teacher=self.teacher2,
             optimizer=self.optimizer2,
             loader=self.clean_loader2,
-            epoch_idx=epoch_idx,
+            epoch_idx=source_epoch,
         )
         if self.clean_loader2 is not None:
-            self._update_teachers_once(epoch_idx)
+            self._update_teachers_once(source_epoch)
         noisy_loss1 = self._run_noisy_branch(
             model=self.model,
             peer_model=self.model2,
             teacher=self.teacher1,
             optimizer=self.optimizer,
             loader=self.noisy_loader1,
-            epoch_idx=epoch_idx,
+            epoch_idx=source_epoch,
+            branch_id=1,
         )
         noisy_loss2 = self._run_noisy_branch(
             model=self.model2,
@@ -276,11 +351,12 @@ class SelfPUTrainer(BaseTrainer):
             teacher=self.teacher2,
             optimizer=self.optimizer2,
             loader=self.noisy_loader2,
-            epoch_idx=epoch_idx,
+            epoch_idx=source_epoch,
+            branch_id=2,
         )
-        self._update_teachers_once(epoch_idx)
+        self._update_teachers_once(source_epoch)
         self._shuffle_noisy_loaders()
-        self._last_completed_epoch = epoch_idx
+        self._last_completed_epoch = source_epoch
         self._epoch_stats.update(
             {
                 "selfpu_clean_loss1": clean_loss1,
@@ -289,7 +365,7 @@ class SelfPUTrainer(BaseTrainer):
                 "selfpu_noisy_loss2": noisy_loss2,
             }
         )
-        if epoch_idx >= self.selfpu_cfg.mean_teacher_start and getattr(
+        if source_epoch >= self.selfpu_cfg.mean_teacher_start and getattr(
             self, "checkpoint_handler", None
         ):
             self.set_checkpoint_early_stopping(True)
@@ -302,10 +378,12 @@ class SelfPUTrainer(BaseTrainer):
             if hasattr(dataset, "shuffle"):
                 dataset.shuffle()
 
-    def _step_schedulers_source_order(self, epoch_idx: int) -> None:
+    def _source_epoch(self, epoch_idx: int) -> int:
+        return max(0, int(epoch_idx) - 1)
+
+    def _step_schedulers_source_order(self, source_epoch: int) -> None:
         """Apply the source's train-before-loop cosine schedule without warnings."""
 
-        source_epoch = max(0, int(epoch_idx) - 1)
         for scheduler in (self.scheduler1, self.scheduler2):
             t_max = max(1, int(getattr(scheduler, "T_max", 1)))
             eta_min = float(getattr(scheduler, "eta_min", 0.0))
@@ -367,16 +445,54 @@ class SelfPUTrainer(BaseTrainer):
         optimizer: torch.optim.Optimizer,
         loader: DataLoader,
         epoch_idx: int,
+        branch_id: int,
     ) -> float:
         total_loss = 0.0
         total_count = 0
         mutual_accepts = 0
         mutual_batches = 0
+        calibration_w0 = 0.0
+        calibration_w1 = 0.0
+        calibration_batches = 0
+        use_self_calibration = (
+            self.selfpu_cfg.self_calibration_enabled
+            and self._check_self_paced(epoch_idx)
+        )
+        if use_self_calibration and not self._self_calibration_logged:
+            self._log_source_event(
+                "Self-PU self-calibration active: "
+                f"meta_source={self.selfpu_cfg.self_calibration_meta_source}, "
+                "target=train/val unlabeled inputs only."
+            )
+            self._self_calibration_logged = True
         for x, pu_y, _true_y, _idx, _pseudo in loader:
             x = x.to(self.device)
             pu_y = pu_y.to(self.device)
-            logits = model(x).view(-1)
-            pu_loss = self.criterion_unlabeled(logits, pu_y)
+            if use_self_calibration:
+                (
+                    pu_loss,
+                    entropy_loss,
+                    logits,
+                    weight_stats,
+                ) = self._self_calibrated_pu_loss(
+                    model,
+                    x,
+                    pu_y,
+                    branch_id=branch_id,
+                )
+                calibration_w0 += weight_stats["weight0_sum"]
+                calibration_w1 += weight_stats["weight1_sum"]
+                calibration_batches += 1
+            else:
+                logits = model(x).view(-1)
+                pu_loss = source_nnpu_loss(
+                    logits,
+                    pu_y,
+                    self.prior,
+                    beta=float(self.params.get("beta", 0.0)),
+                    gamma=float(self.params.get("gamma", 1.0)),
+                )
+                entropy_loss = torch.zeros((), device=self.device)
             loss = self.selfpu_cfg.pu_loss_weight * pu_loss
 
             if self.selfpu_cfg.mutual_type == "mu" and self._check_mean_teacher(
@@ -404,6 +520,11 @@ class SelfPUTrainer(BaseTrainer):
                     * softmax_mse_consistency(logits, teacher_logits)
                 )
 
+            if use_self_calibration:
+                loss = loss + (
+                    self.selfpu_cfg.self_calibration_entropy_weight * entropy_loss
+                )
+
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -415,7 +536,155 @@ class SelfPUTrainer(BaseTrainer):
             previous = self._epoch_stats.get(key)
             value = float(mutual_accepts / mutual_batches)
             self._epoch_stats[key] = value if previous is None else (previous + value) / 2
+        if calibration_batches:
+            prefix = f"selfpu_calibration_branch{branch_id}"
+            self._epoch_stats[f"{prefix}_w0_sum"] = float(
+                calibration_w0 / calibration_batches
+            )
+            self._epoch_stats[f"{prefix}_w1_sum"] = float(
+                calibration_w1 / calibration_batches
+            )
         return total_loss / max(1, total_count)
+
+    def _self_calibrated_pu_loss(
+        self,
+        model: torch.nn.Module,
+        x: torch.Tensor,
+        pu_y: torch.Tensor,
+        *,
+        branch_id: int,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str, float]]:
+        """Source ``train_2s2t_mix.py`` noisy-batch self-calibration.
+
+        The source computes per-batch ``eps`` weights with a virtual inner
+        update and an entropy meta objective on a test batch.  PU-Bench keeps
+        the weighting mechanism but feeds only train/validation U inputs to the
+        meta objective.
+        """
+
+        param_dtype = next(model.parameters()).dtype
+        eps = torch.zeros(
+            (int(x.shape[0]), 2),
+            device=self.device,
+            dtype=param_dtype,
+            requires_grad=True,
+        )
+        params = {name: param for name, param in model.named_parameters()}
+        buffers = {
+            name: buffer.detach().clone()
+            for name, buffer in model.named_buffers()
+        }
+        meta_logits = functional_call(model, (params, buffers), (x,)).view(-1)
+        negative_entropy = -sigmoid_entropy_values(meta_logits)
+        meta_pu_loss = source_nnpu_loss(
+            meta_logits,
+            pu_y,
+            self.prior,
+            beta=float(self.params.get("beta", 0.0)),
+            gamma=float(self.params.get("gamma", 1.0)),
+            sample_weight=eps[:, 0],
+        )
+        meta_objective = (negative_entropy * eps[:, 1]).mean() + meta_pu_loss
+        param_names = tuple(params.keys())
+        param_values = tuple(params.values())
+        grads = torch.autograd.grad(
+            meta_objective,
+            param_values,
+            create_graph=True,
+            allow_unused=False,
+        )
+        updated_params = {
+            name: value - self.selfpu_cfg.self_calibration_inner_lr * grad
+            for name, value, grad in zip(param_names, param_values, grads)
+        }
+        meta_x = self._next_meta_unlabeled_inputs()
+        updated_logits = functional_call(
+            model,
+            (updated_params, buffers),
+            (meta_x,),
+        ).view(-1)
+        meta_target_loss = 2.0 * sigmoid_entropy_loss(updated_logits)
+        grad_eps = torch.autograd.grad(
+            meta_target_loss,
+            eps,
+            only_inputs=True,
+        )[0]
+        weights = torch.clamp(-grad_eps, min=0.0)
+        weights = self._normalize_self_calibration_weights(
+            weights,
+            pu_y,
+            branch_id=branch_id,
+        )
+        logits = model(x).view(-1)
+        pu_loss = source_nnpu_loss(
+            logits,
+            pu_y,
+            self.prior,
+            beta=float(self.params.get("beta", 0.0)),
+            gamma=float(self.params.get("gamma", 1.0)),
+            sample_weight=weights[:, 0],
+        )
+        entropy_loss = (sigmoid_entropy_values(logits) * weights[:, 1]).mean()
+        stats = {
+            "weight0_sum": float(weights[:, 0].sum().detach().cpu()),
+            "weight1_sum": float(weights[:, 1].sum().detach().cpu()),
+        }
+        return pu_loss, entropy_loss, logits, stats
+
+    def _normalize_self_calibration_weights(
+        self,
+        weights: torch.Tensor,
+        pu_y: torch.Tensor,
+        *,
+        branch_id: int,
+    ) -> torch.Tensor:
+        """Normalize source meta weights while keeping P fixed as PU risk only."""
+
+        normalized = weights.detach().clone()
+        normalized[:, 0] = normalized[:, 0] + 1e-10
+        budget = self.selfpu_cfg.self_calibration_gamma * float(
+            self.selfpu_cfg.batch_size
+        )
+        labels = pu_y.view(-1)
+        for row in range(int(normalized.shape[0])):
+            if int(labels[row].item()) != -1:
+                normalized[row, 0] = 1.0
+                normalized[row, 1] = 0.0
+                continue
+            if branch_id == 2:
+                budget_used = normalized[:row, 1].sum()
+            else:
+                budget_used = normalized[:, 1].sum()
+            if float(budget_used.detach().cpu()) >= budget:
+                normalized[row, 0] = 1.0
+                normalized[row, 1] = 0.0
+                continue
+            row_sum = normalized[row, :].sum()
+            if float(row_sum.detach().cpu()) <= 0.0:
+                normalized[row, 0] = 1.0
+                normalized[row, 1] = 0.0
+            else:
+                normalized[row, :] = normalized[row, :] / row_sum
+        return normalized
+
+    def _next_meta_unlabeled_inputs(self) -> torch.Tensor:
+        """Return a batch of unlabeled inputs from validation/train, never test."""
+
+        for _ in range(max(2, len(self._meta_target_loader) + 1)):
+            try:
+                batch = next(self._meta_target_iter)
+            except StopIteration:
+                self._meta_target_iter = iter(self._meta_target_loader)
+                batch = next(self._meta_target_iter)
+            x, pu_y = batch[0], batch[1]
+            if isinstance(x, (list, tuple)):
+                x = x[0]
+            mask = pu_y == -1
+            if mask.any():
+                return x[mask].to(self.device)
+        raise RuntimeError(
+            "Self-PU self-calibration could not find unlabeled train/val inputs."
+        )
 
     def _maybe_start_mean_teacher(self, epoch_idx: int) -> None:
         if not self._check_mean_teacher(epoch_idx) or self._mean_teacher_switched:
@@ -423,7 +692,7 @@ class SelfPUTrainer(BaseTrainer):
         self.teacher1.copy_from(self.model)
         self.teacher2.copy_from(self.model2)
         self._mean_teacher_switched = True
-        self.console.log("Self-PU mean-teacher EMA initialized from students.")
+        self._log_source_event("Self-PU mean-teacher EMA initialized from students.")
 
     def _update_teachers_once(self, epoch_idx: int) -> None:
         if self._check_mean_teacher(epoch_idx):
@@ -508,7 +777,7 @@ class SelfPUTrainer(BaseTrainer):
         def fmt(value: float | None) -> str:
             return "n/a" if value is None else f"{value:.2%}"
 
-        self.console.log(
+        self._log_source_event(
             "Self-PU selection "
             f"epoch={epoch_idx}: "
             f"model1 clean={len(self.state1.clean_indices)} "
@@ -524,6 +793,11 @@ class SelfPUTrainer(BaseTrainer):
             f"elapsed={elapsed:.1f}s"
         )
 
+    def _log_source_event(self, message: str) -> None:
+        self.console.log(message)
+        if self.file_console is not None:
+            self.file_console.log(message)
+
     def _candidate_models(self) -> list[tuple[str, torch.nn.Module]]:
         candidates = [("student1", self.model), ("student2", self.model2)]
         if self._mean_teacher_switched:
@@ -532,14 +806,16 @@ class SelfPUTrainer(BaseTrainer):
             )
         return candidates
 
-    def _reporting_metrics(self) -> tuple[dict[str, float], dict[str, float], dict[str, float]]:
+    def _reporting_metrics(
+        self,
+    ) -> tuple[dict[str, float], dict[str, float], dict[str, float]]:
         """Report the best Self-PU candidate instead of hard-wiring student1.
 
         The author source validates ``student1``, ``student2`` and, after the
         mean-teacher switch, both EMA teachers, then keeps the best one.  PU-Bench
         cannot use oracle labels for benchmark model selection, so this
-        controlled entry follows the benchmark proxy-accuracy monitor.  If PA
-        starts preferring a degenerate candidate, first rule out numerical
+        controlled entry follows the configured benchmark proxy monitor.  If the
+        proxy starts preferring a degenerate candidate, first rule out numerical
         instability in the training loop before changing the proxy metric.
         """
 
@@ -554,7 +830,7 @@ class SelfPUTrainer(BaseTrainer):
                 self.prior,
                 scenario,
             )
-            score = float(proxy.get("proxy_acc", float("-inf")))
+            score = self._candidate_monitor_score(proxy)
             if np.isnan(score):
                 score = float("-inf")
             candidate_records.append((score, candidate_id, name, model, proxy))
@@ -564,7 +840,7 @@ class SelfPUTrainer(BaseTrainer):
             key=lambda item: item[0],
         )
         if name != self._last_report_model_name:
-            self.console.log(f"Self-PU reporting candidate: {name}")
+            self._log_source_event(f"Self-PU reporting candidate: {name}")
             self._last_report_model_name = name
         self._last_report_model = model
         prior_calibrated_fallback = self._oracle_prior_calibrated_fallback()
@@ -608,6 +884,18 @@ class SelfPUTrainer(BaseTrainer):
         )
         test_metrics["selfpu_report_model_id"] = float(candidate_id)
         return train_metrics, val_metrics, test_metrics
+
+    def _candidate_monitor_score(self, proxy_metrics: dict[str, float]) -> float:
+        monitor = "val_proxy_acc"
+        if self.checkpoint_handler is not None:
+            monitor = str(getattr(self.checkpoint_handler, "monitor", monitor))
+        metric_key = monitor
+        for prefix in ("val_", "train_", "test_"):
+            if metric_key.startswith(prefix):
+                metric_key = metric_key[len(prefix):]
+                break
+        fallback = proxy_metrics.get("proxy_acc", float("-inf"))
+        return float(proxy_metrics.get(metric_key, fallback))
 
     def get_checkpoint_model(self):
         return self._last_report_model or self.model
