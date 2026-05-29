@@ -1,12 +1,43 @@
-# PU-Bench
 
-A unified open-source benchmark for **Positive-Unlabeled (PU) learning**.
 
-PU-Bench provides a standardized framework for evaluating PU learning algorithms under consistent conditions, covering data generation, training, and evaluation in a single reproducible pipeline. It currently integrates **18 PU methods** plus a fully supervised **PN** oracle baseline across **9 datasets** spanning text, image, and tabular modalities.
+<p align="center">
+  <img width="521" alt="PU-Bench" src="https://github.com/user-attachments/assets/a5e7ce0b-496b-43f8-8804-5b26804679e9" />
+</p>
+<p align="center">
+  <strong>A unified open-source benchmark for rigorous and reproducible Positive-Unlabeled learning.</strong>
+</p>
 
-> **Paper**: [PU-Bench: A Unified Benchmark for Rigorous and Reproducible PU Learning](https://openreview.net/forum?id=tb8DabMbMq) (ICLR 2026)
->
-> **Friendly Link**: PU-Bench now supports the PU-only validation metrics `PA` and `PAUC` introduced in [Accessible, Realistic, and Fair Evaluation of Positive-Unlabeled Learning Algorithms (ICLR 2026)](https://openreview.net/forum?id=5R11h5o44C), exposed here as `proxy_acc` and `proxy_auc`. If you are looking for the authors' official benchmark release, please also see [wu-dd/PUBench](https://github.com/wu-dd/PUBench).
+<p align="center">
+  <a href="https://openreview.net/forum?id=tb8DabMbMq">
+    <img src="https://img.shields.io/badge/Paper-ICLR%202026-1f4b99?style=flat-square" alt="ICLR 2026 Paper">
+  </a>
+  <a href="https://github.com/XiXiphus/PU-Bench/blob/main/LICENSE">
+    <img src="https://img.shields.io/badge/License-MIT-00a896?style=flat-square" alt="MIT License">
+  </a>
+  <a href="https://github.com/XiXiphus/PU-Bench">
+    <img src="https://img.shields.io/badge/Python-%E2%89%A53.11-3776ab?style=flat-square&logo=python&logoColor=white" alt="Python >=3.11">
+  </a>
+  <a href="https://github.com/astral-sh/uv">
+    <img src="https://img.shields.io/badge/managed%20with-uv-5c4ee5?style=flat-square" alt="managed with uv">
+  </a>
+</p>
+
+<p align="center">
+  <a href="#installation">Installation</a> ·
+  <a href="#quick-start">Quick Start</a> ·
+  <a href="#supported-methods--datasets">Methods & Datasets</a> ·
+  <a href="#results--outputs">Results</a> ·
+  <a href="#citation">Citation</a>
+</p>
+
+---
+
+PU-Bench provides a standardized framework for evaluating PU learning algorithms under consistent conditions, covering data generation, training, and evaluation in a single reproducible pipeline.
+
+It currently integrates **18 PU methods** plus a fully supervised **PN oracle baseline** across datasets spanning **text**, **image**, and **tabular** modalities.
+
+> **Paper:** [PU-Bench: A Unified Benchmark for Rigorous and Reproducible PU Learning](https://openreview.net/forum?id=tb8DabMbMq) — ICLR 2026  
+> **Related benchmark:** PU-Bench supports the PU-only validation metrics `PA` and `PAUC` introduced in [Accessible, Realistic, and Fair Evaluation of Positive-Unlabeled Learning Algorithms](https://openreview.net/forum?id=5R11h5o44C) — ICLR 2026, exposed here as `proxy_acc` and `proxy_auc`. For the authors' official benchmark release, see [wu-dd/PUBench](https://github.com/wu-dd/PUBench).
 
 ---
 
