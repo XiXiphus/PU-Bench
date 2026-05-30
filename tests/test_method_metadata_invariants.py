@@ -201,6 +201,61 @@ class TestMethodMetadataInvariants(unittest.TestCase):
         self.assertEqual(config.params["checkpoint"]["monitor"], "val_proxy_acc")
         self.assertFalse(config.params["checkpoint"]["early_stopping"]["enabled"])
 
+    def test_robustpu_alignment_metadata_is_structured(self) -> None:
+        config = load_method_config("robustpu")
+
+        alignment = config.metadata["alignment"]
+        self.assertEqual(
+            alignment["level"],
+            "source_faithful_kernel_benchmark_wrapper",
+        )
+        self.assertFalse(alignment["source_reproduction"])
+        self.assertIn(
+            "source README 100 epoch nnPU pretraining budget with pre_lr=1e-3, pre_batch_size=128, and pre_wd=1e-4",
+            alignment["retained_source_components"],
+        )
+        self.assertIn(
+            "Welsch self-paced weighting with separate P/U threshold schedulers",
+            alignment["retained_source_components"],
+        )
+        self.assertIn(
+            "PU-Bench controlled dataset splits with shared public backbones",
+            alignment["benchmark_adaptations"],
+        )
+        self.assertIn(
+            "checkpoint monitor val_proxy_acc instead of source oracle validation accuracy to satisfy PU-Bench proxy-metric checkpoint policy",
+            alignment["benchmark_adaptations"],
+        )
+        self.assertIn(
+            "pretraining restores the best source-budget epoch by validation proxy accuracy; no test labels are used for model selection",
+            alignment["benchmark_adaptations"],
+        )
+        self.assertIn(
+            "oracle labels are diagnostics only; no train/validation/test oracle labels are used for RobustPU selection, calibration, losses, or sample weights",
+            alignment["benchmark_adaptations"],
+        )
+        self.assertIn(
+            "Stage2 keeps the source fixed-zero prediction threshold; on controlled public backbones it can improve ranking AUC while fixed-threshold F1/precision/recall collapse to all-negative predictions",
+            alignment["known_limitations"],
+        )
+        self.assertEqual(config.params["backbone_policy"], "controlled")
+        self.assertEqual(config.params["batch_size"], 128)
+        self.assertTrue(config.params["restore_best_pretrain"])
+        self.assertEqual(config.params["pre_train"]["epochs"], 100)
+        self.assertEqual(float(config.params["pre_train"]["lr"]), 0.001)
+        self.assertEqual(config.params["pre_train"]["batch_size"], 128)
+        self.assertEqual(config.params["pre_train"]["monitor"], "val_proxy_acc")
+        self.assertEqual(config.params["pre_train"]["calibration"], "none")
+        self.assertEqual(config.params["main_train"]["epochs"], 100)
+        self.assertEqual(config.params["main_train"]["inner_epochs"], 20)
+        self.assertEqual(config.params["main_train"]["batch_size"], 64)
+        self.assertEqual(config.params["main_train"]["scheduler_p"]["grow_steps"], 5)
+        self.assertEqual(config.params["main_train"]["scheduler_n"]["grow_steps"], 5)
+        self.assertEqual(config.params["main_train"]["scheduler_n"]["temper"], 1.3)
+        self.assertEqual(config.params["checkpoint"]["monitor"], "val_proxy_acc")
+        self.assertTrue(config.params["checkpoint"]["early_stopping"]["enabled"])
+        self.assertEqual(config.params["checkpoint"]["early_stopping"]["patience"], 5)
+
     def test_selfpu_alignment_metadata_is_structured(self) -> None:
         config = load_method_config("selfpu")
 

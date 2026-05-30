@@ -20,8 +20,10 @@ Source facts preserved here:
 Benchmark boundary:
     This is the controlled-backbone PU-Bench entry.  The source paper's dataset
     recipes are not reproduced; the estimator is run on PU-Bench's own
-    SCAR/SAR splits to measure robustness.  Model selection uses the benchmark
-    proxy monitor, not the source paper's oracle validation labels.
+    SCAR/SAR splits to measure robustness.  PU-Bench checkpointing and
+    pretraining restore use validation proxy accuracy.  True labels are
+    diagnostics only; they are never used for model selection, calibration,
+    losses, or sample weights.
 """
 
 from __future__ import annotations
@@ -38,12 +40,12 @@ from tqdm import tqdm
 
 from ..base_trainer import BaseTrainer
 from ..metrics import evaluate_metrics, evaluate_proxy_metrics
-from ..common.pu_risk import PULoss
 from ..reproducibility import seed_worker
 from .losses import (
     binary_cross_entropy_loss,
     focal_binary_loss,
     hardness_values,
+    source_pu_loss,
 )
 from .model_selector import select_model
 from .spl import TrainingScheduler, calculate_spl_weights
@@ -54,12 +56,16 @@ class RobustPUStageConfig:
     pre_epochs: int
     pre_lr: float
     pre_weight_decay: float
+    pre_batch_size: int
     pre_loss: str
     pre_optimizer: str
+    pre_monitor: str | None
+    pre_calibration: str | None
     episodes: int
     inner_epochs: int
     main_lr: float
     main_weight_decay: float
+    main_batch_size: int
     main_loss: str
     main_optimizer: str
     hardness: str
@@ -123,6 +129,7 @@ class RobustPUTrainer(BaseTrainer):
         super().before_training()
         self._sync_prior_from_pu_metadata()
         self.robust_cfg = self._parse_stage_config()
+        self._validate_proxy_acc_monitor_policy()
         self.scheduler_p = self._make_scheduler("scheduler_p", default_alpha=0.1)
         self.scheduler_n = self._make_scheduler("scheduler_n", default_alpha=0.11)
         self._moving_weights_by_index: dict[int, float] | None = None
@@ -186,16 +193,41 @@ class RobustPUTrainer(BaseTrainer):
             pre_weight_decay=float(
                 pre.get("weight_decay", self.params.get("pre_wd", 0.0))
             ),
+            pre_batch_size=int(
+                pre.get(
+                    "batch_size",
+                    self.params.get(
+                        "pre_batch_size",
+                        self.params.get("batch_size", 128),
+                    ),
+                )
+            ),
             pre_loss=str(pre.get("loss", self.params.get("pre_loss", "nnpu"))).lower(),
             pre_optimizer=str(
                 pre.get("optimizer", self.params.get("pre_optimizer", "adam"))
             ).lower(),
+            pre_monitor=(
+                str(pre.get("monitor", pre.get("selection_monitor")))
+                if pre.get("monitor", pre.get("selection_monitor")) is not None
+                else None
+            ),
+            pre_calibration=(
+                str(pre.get("calibration", pre.get("logit_calibration")))
+                if pre.get("calibration", pre.get("logit_calibration")) is not None
+                else None
+            ),
             episodes=int(main.get("epochs", self.params.get("epochs", 100))),
             inner_epochs=int(
                 main.get("inner_epochs", self.params.get("inner_epochs", 1))
             ),
             main_lr=float(main.get("lr", self.params.get("lr", 1e-4))),
             main_weight_decay=float(main.get("weight_decay", self.params.get("wd", 0.0))),
+            main_batch_size=int(
+                main.get(
+                    "batch_size",
+                    self.params.get("batch_size", 64),
+                )
+            ),
             main_loss=str(main.get("loss", self.params.get("loss", "bce"))).lower(),
             main_optimizer=str(
                 main.get("optimizer", self.params.get("optimizer", "adam"))
@@ -208,6 +240,27 @@ class RobustPUTrainer(BaseTrainer):
             phi=float(main.get("moving_ratio", self.params.get("phi", 0.0))),
             restart=bool(main.get("restart", self.params.get("restart", False))),
         )
+
+    def _validate_proxy_acc_monitor_policy(self) -> None:
+        monitors = []
+        if self.checkpoint_handler:
+            monitors.append(("checkpoint.monitor", self.checkpoint_handler.monitor))
+        if self.robust_cfg.pre_monitor:
+            monitors.append(("pre_train.monitor", self.robust_cfg.pre_monitor))
+
+        for name, monitor in monitors:
+            if str(monitor) != "val_proxy_acc":
+                raise ValueError(
+                    "RobustPU benchmark selection must use val_proxy_acc under "
+                    f"PU-Bench policy; got {name}={monitor!r}."
+                )
+
+        calibration = self.robust_cfg.pre_calibration
+        if calibration and str(calibration).lower() not in {"none", "false", "off"}:
+            raise ValueError(
+                "RobustPU benchmark entry disables oracle-label pretrain "
+                f"calibration; got pre_train.calibration={calibration!r}."
+            )
 
     def _make_scheduler(self, name: str, *, default_alpha: float) -> TrainingScheduler:
         main = self.params.get("main_train", {}) or {}
@@ -265,6 +318,7 @@ class RobustPUTrainer(BaseTrainer):
             weight_decay=cfg.pre_weight_decay,
         )
         criterion = self._make_pu_loss(cfg.pre_loss)
+        pretrain_loader = self._make_pretrain_loader()
 
         best_state: dict[str, Any] | None = None
         best_pretrain_score = float("-inf")
@@ -275,7 +329,7 @@ class RobustPUTrainer(BaseTrainer):
             desc=f"Pre-training ({self.method.upper()})",
         ):
             self.model.train()
-            for x, pu_labels, _y_true, _idx, _pseudo in self.train_loader:
+            for x, pu_labels, _y_true, _idx, _pseudo in pretrain_loader:
                 x = self._source_input(x).to(self.device)
                 pu_labels = pu_labels.to(self.device)
                 logits = self._positive_logit(self.model(x))
@@ -300,6 +354,7 @@ class RobustPUTrainer(BaseTrainer):
                 train_metrics,
                 val_metrics,
                 test_metrics,
+                monitor_override=cfg.pre_monitor,
             )
             if pretrain_score > best_pretrain_score:
                 best_pretrain_score = pretrain_score
@@ -307,6 +362,115 @@ class RobustPUTrainer(BaseTrainer):
 
         if best_state is not None and bool(self.params.get("restore_best_pretrain", True)):
             self.model.load_state_dict(best_state)
+        if cfg.pre_calibration:
+            self._apply_pretrain_calibration(cfg.pre_calibration)
+
+    def _make_pretrain_loader(self) -> DataLoader:
+        return DataLoader(
+            self.train_loader.dataset,
+            batch_size=self.robust_cfg.pre_batch_size,
+            shuffle=True,
+            num_workers=int(self.params.get("num_workers", 0)),
+            pin_memory=torch.cuda.is_available(),
+            worker_init_fn=seed_worker,
+        )
+
+    def _apply_pretrain_calibration(self, calibration: str) -> None:
+        calibration = str(calibration).lower()
+        if calibration in {"none", "false", "off"}:
+            return
+        if calibration != "val_oracle_accuracy_threshold":
+            raise ValueError(
+                "RobustPU pretrain calibration must be "
+                "'val_oracle_accuracy_threshold' or 'none'."
+            )
+        threshold, accuracy = self._calibrate_final_bias_with_validation()
+        message = (
+            "RobustPU validation logit calibration: "
+            f"threshold={threshold:.6g}, bias_delta={-threshold:.6g}, "
+            f"val_oracle_accuracy={accuracy:.6g}"
+        )
+        self.console.log(message)
+        if self.file_console:
+            self.file_console.log(message)
+
+    def _calibrate_final_bias_with_validation(self) -> tuple[float, float]:
+        if self.validation_loader is None:
+            raise ValueError(
+                "RobustPU validation calibration requires a validation loader. "
+                "Set a positive val_ratio or disable pre_train.calibration."
+            )
+        logits, true_labels = self._collect_logits_and_true_labels(self.validation_loader)
+        threshold, accuracy = self._best_binary_accuracy_threshold(logits, true_labels)
+        head = self._last_single_logit_linear()
+        if head is None:
+            raise ValueError(
+                "RobustPU validation calibration requires a single-logit linear head."
+            )
+        with torch.no_grad():
+            head.bias.add_(
+                torch.as_tensor(
+                    -threshold,
+                    device=head.bias.device,
+                    dtype=head.bias.dtype,
+                )
+            )
+        return threshold, accuracy
+
+    def _collect_logits_and_true_labels(
+        self,
+        loader: DataLoader,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        training = self.model.training
+        self.model.eval()
+        logits_all: list[torch.Tensor] = []
+        true_all: list[torch.Tensor] = []
+        with torch.no_grad():
+            for x, _pu_labels, y_true, _idx, _pseudo in loader:
+                x = self._source_input(x).to(self.device)
+                logits = self._positive_logit(self.model(x))
+                logits_all.append(logits.detach().cpu().view(-1))
+                true_all.append(y_true.detach().cpu().view(-1).long())
+        self.model.train(training)
+        return torch.cat(logits_all), torch.cat(true_all)
+
+    @staticmethod
+    def _best_binary_accuracy_threshold(
+        logits: torch.Tensor,
+        true_labels: torch.Tensor,
+    ) -> tuple[float, float]:
+        logits = logits.detach().cpu().view(-1).float()
+        true_labels = true_labels.detach().cpu().view(-1).long()
+        if logits.numel() == 0:
+            raise ValueError("Cannot calibrate RobustPU logits on an empty validation set.")
+        sorted_logits, _ = torch.sort(logits)
+        candidates = [float(sorted_logits[0].item() - 1.0)]
+        candidates.extend(
+            float(((sorted_logits[idx - 1] + sorted_logits[idx]) * 0.5).item())
+            for idx in range(1, sorted_logits.numel())
+        )
+        candidates.append(float(sorted_logits[-1].item() + 1.0))
+
+        best_threshold = candidates[0]
+        best_accuracy = -1.0
+        for threshold in candidates:
+            predictions = (logits > threshold).long()
+            accuracy = float(predictions.eq(true_labels).float().mean().item())
+            if accuracy > best_accuracy:
+                best_accuracy = accuracy
+                best_threshold = threshold
+        return best_threshold, best_accuracy
+
+    def _last_single_logit_linear(self) -> nn.Linear | None:
+        found: nn.Linear | None = None
+        for module in self.model.modules():
+            if (
+                isinstance(module, nn.Linear)
+                and int(getattr(module, "out_features", 0)) == 1
+                and getattr(module, "bias", None) is not None
+            ):
+                found = module
+        return found
 
     def _run_self_paced_training(self) -> None:
         cfg = self.robust_cfg
@@ -377,7 +541,7 @@ class RobustPUTrainer(BaseTrainer):
                 "not enabled in the controlled PU-Bench entry. Use logistic or sigmoid."
             )
 
-        source_loader = self.update_loader or self.train_loader
+        source_loader = self._make_weight_source_loader()
         self.model.eval()
         data_all: list[torch.Tensor] = []
         pu_all: list[torch.Tensor] = []
@@ -440,11 +604,18 @@ class RobustPUTrainer(BaseTrainer):
         weighted_dataset = TensorDataset(data, pu_labels, true_labels, weights)
         return DataLoader(
             weighted_dataset,
-            batch_size=int(
-                (self.params.get("main_train", {}) or {}).get(
-                    "batch_size", self.params.get("batch_size", 64)
-                )
-            ),
+            batch_size=cfg.main_batch_size,
+            shuffle=True,
+            num_workers=int(self.params.get("num_workers", 0)),
+            pin_memory=torch.cuda.is_available(),
+            worker_init_fn=seed_worker,
+        )
+
+    def _make_weight_source_loader(self) -> DataLoader:
+        dataset = (self.update_loader or self.train_loader).dataset
+        return DataLoader(
+            dataset,
+            batch_size=self.robust_cfg.main_batch_size,
             shuffle=True,
             num_workers=int(self.params.get("num_workers", 0)),
             pin_memory=torch.cuda.is_available(),
@@ -510,16 +681,36 @@ class RobustPUTrainer(BaseTrainer):
             if weights.sum().item() <= 1e-8:
                 continue
             logits = self._positive_logit(self.model(x))
-            loss = self._stage_loss(criterion, self.robust_cfg.main_loss, logits, pu_labels, weights)
+            loss = self._stage_loss(
+                criterion,
+                self.robust_cfg.main_loss,
+                logits,
+                pu_labels,
+                weights,
+            )
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
     def _make_pu_loss(self, loss_name: str):
         if loss_name == "nnpu":
-            return PULoss(self.prior, loss="sigmoid", nnpu=True)
+            return lambda logits, labels, weights=None: source_pu_loss(
+                logits,
+                labels,
+                self.prior,
+                weights,
+                sur_loss="sigmoid",
+                nnpu=True,
+            )
         if loss_name == "upu":
-            return PULoss(self.prior, loss="sigmoid", nnpu=False)
+            return lambda logits, labels, weights=None: source_pu_loss(
+                logits,
+                labels,
+                self.prior,
+                weights,
+                sur_loss="sigmoid",
+                nnpu=False,
+            )
         if loss_name in {"bce", "focal"}:
             return loss_name
         raise ValueError("RobustPU loss must be one of 'bce', 'focal', 'nnpu', 'upu'.")
@@ -599,33 +790,44 @@ class RobustPUTrainer(BaseTrainer):
         train_metrics: dict[str, float],
         val_metrics: dict[str, float] | None,
         test_metrics: dict[str, float],
+        monitor_override: str | None = None,
     ) -> float:
-        """Select pretrain initialization by the benchmark monitor when possible."""
-        monitor = (
-            getattr(self.checkpoint_handler, "monitor", None)
-            if self.checkpoint_handler
-            else None
-        ) or "val_proxy_acc"
+        """Select pretrain initialization by PU-Bench validation proxy accuracy."""
+        if monitor_override:
+            monitor = monitor_override
+        elif self.checkpoint_handler:
+            monitor = getattr(self.checkpoint_handler, "monitor", None)
+        else:
+            monitor = None
+        monitor = monitor or "val_proxy_acc"
         if "_" in monitor:
             phase, key = monitor.split("_", 1)
         else:
             phase, key = "val", monitor
+        if phase == "test":
+            raise ValueError(
+                "RobustPU does not allow test metrics for model selection. "
+                f"Got monitor '{monitor}'."
+            )
+        if key != "proxy_acc":
+            raise ValueError(
+                "RobustPU benchmark model selection must use proxy_acc. "
+                f"Got monitor '{monitor}'."
+            )
 
         phase_metrics = {
             "train": train_metrics,
             "val": val_metrics,
-            "test": test_metrics,
         }
         metrics = phase_metrics.get(phase)
         if metrics is not None and key in metrics:
             return float(metrics[key])
 
-        for metrics in (val_metrics, test_metrics, train_metrics):
+        for metrics in (val_metrics, train_metrics):
             if metrics is None:
                 continue
-            for key in ("proxy_acc", "proxy_auc"):
-                if key in metrics:
-                    return float(metrics[key])
+            if "proxy_acc" in metrics:
+                return float(metrics["proxy_acc"])
         return float("-inf")
 
     def _checkpoint_epoch(

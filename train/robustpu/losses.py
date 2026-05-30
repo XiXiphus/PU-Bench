@@ -15,6 +15,52 @@ import torch
 import torch.nn.functional as F
 
 
+def _source_surrogate_loss(name: str):
+    if name == "sigmoid":
+        return lambda x: torch.sigmoid(-x)
+    if name == "logistic":
+        return lambda x: F.softplus(-x)
+    raise ValueError("RobustPU PU loss surrogate must be 'sigmoid' or 'logistic'.")
+
+
+def source_pu_loss(
+    logits: torch.Tensor,
+    labels: torch.Tensor,
+    prior: float,
+    weights: torch.Tensor | None = None,
+    *,
+    sur_loss: str = "sigmoid",
+    nnpu: bool = True,
+    gamma: float = 1.0,
+    beta: float = 0.0,
+) -> torch.Tensor:
+    """Robust-PU source PU risk scalar from ``lossFunc.py``."""
+
+    logits = logits.view(-1)
+    labels = labels.view(-1)
+    if weights is None:
+        weights = torch.ones_like(logits)
+    else:
+        weights = weights.view(-1).to(device=logits.device, dtype=logits.dtype)
+
+    loss = _source_surrogate_loss(str(sur_loss).lower())
+    positive = (labels == 1).to(dtype=logits.dtype)
+    unlabeled = (labels == -1).to(dtype=logits.dtype)
+    n_positive = max(1.0, float(positive.sum().item()))
+    n_unlabeled = max(1.0, float(unlabeled.sum().item()))
+
+    y_positive = loss(logits) * weights
+    y_unlabeled = loss(-logits) * weights
+    positive_risk = torch.sum(float(prior) * positive * y_positive / n_positive)
+    negative_risk = torch.sum(
+        (unlabeled / n_unlabeled - float(prior) * positive / n_positive)
+        * y_unlabeled
+    )
+    if nnpu and negative_risk.item() < -float(beta):
+        return -float(gamma) * negative_risk
+    return positive_risk + negative_risk
+
+
 def binary_cross_entropy_loss(
     logits: torch.Tensor,
     labels: torch.Tensor,
