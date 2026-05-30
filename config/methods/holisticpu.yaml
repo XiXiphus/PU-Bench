@@ -18,9 +18,11 @@ holisticpu:
         - "Jenks partitioning with the source three_sigma filter"
         - "phase-2 loss_ft soft-label/consistency objective"
         - "source-style weak/strong image augmentation recipe"
+        - "source run.sh learning rates for source-supported image datasets"
       benchmark_adaptations:
         - "PU-Bench public backbone by default for main-table comparison"
         - "PU-Bench loaders, checkpoints, proxy metrics, and dataset splits"
+        - "dataset-class learning-rate resolver; MNIST reuses the source FashionMNIST LeNet rate"
         - "benchmark-specific weak/strong augmentation for vector and tabular datasets"
       modality_alignment:
         image: "source_aligned_recipe_with_controlled_backbone"
@@ -34,7 +36,14 @@ holisticpu:
   expand_labels: false  # source also expands automatically when n_labeled < batch_size
   init_bias_from_prior: false
   optimizer: "sgd"
+  # Fallback only. Source-supported image datasets are resolved from run.sh below.
   lr: 0.01
+  use_source_lr_by_dataset: true
+  source_lr_by_dataset:
+    cifar10: 0.0015
+    fashionmnist: 0.002
+    mnist: 0.002  # PU-Bench extension; source FashionMNIST LeNet rate.
+    alzheimermri: 0.0005
   weight_decay: 0.0005
   momentum: 0.9
   nesterov: true

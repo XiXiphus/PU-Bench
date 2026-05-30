@@ -34,7 +34,7 @@ from ..augmentations.vector import (
     VectorWeakAugment,
 )
 from ..base_trainer import BaseTrainer
-from ..metrics import evaluate_metrics, evaluate_proxy_metrics
+from ..metrics import _model_predict, evaluate_metrics, evaluate_proxy_metrics
 from ..reproducibility import seed_worker
 from .core import (
     as_numpy,
@@ -45,7 +45,12 @@ from .core import (
     soft_cross_entropy,
     source_three_sigma,
 )
-from .augment import HolisticPUDatasetWrapper, TransformHolisticPU
+from .augment import (
+    HolisticPUDatasetWrapper,
+    HolisticPUEvalDatasetWrapper,
+    TransformHolisticPU,
+    TransformHolisticPUEval,
+)
 from .model_selector import select_model
 
 
@@ -89,6 +94,31 @@ class HolisticPUTrainer(BaseTrainer):
         self.pseudo_labels_map: dict[int, int] = {}
         self._unlabeled_base_indices: np.ndarray | None = None
         self._last_phase_losses: dict[str, float] = {}
+
+    def configure(self) -> None:
+        super().configure()
+        if not bool(self.params.get("use_source_lr_by_dataset", True)):
+            return
+        mapping = self.params.get("source_lr_by_dataset") or {}
+        if not isinstance(mapping, dict):
+            return
+        key = self._source_lr_key(str(self.params.get("dataset_class", "")))
+        if key in mapping:
+            self.params["lr"] = float(mapping[key])
+            self.params["source_lr_resolved_from"] = f"source_lr_by_dataset.{key}"
+
+    @staticmethod
+    def _source_lr_key(dataset_class: str) -> str:
+        dataset_class = dataset_class.lower()
+        if "cifar" in dataset_class:
+            return "cifar10"
+        if "fashion" in dataset_class:
+            return "fashionmnist"
+        if "mnist" in dataset_class:
+            return "mnist"
+        if "alzheimer" in dataset_class or "mri" in dataset_class:
+            return "alzheimermri"
+        return dataset_class
 
     def create_criterion(self):
         return nn.CrossEntropyLoss()
@@ -287,6 +317,10 @@ class HolisticPUTrainer(BaseTrainer):
             pin_memory=pin_memory,
             worker_init_fn=seed_worker,
         )
+        self.validation_loader = self._wrap_eval_loader_for_holisticpu(
+            self.validation_loader
+        )
+        self.test_loader = self._wrap_eval_loader_for_holisticpu(self.test_loader)
 
     def _base_train_dataset(self):
         dataset = self.train_loader.dataset
@@ -326,6 +360,33 @@ class HolisticPUTrainer(BaseTrainer):
             wrapped.pu_metadata = base_dataset.pu_metadata
             wrapped.metadata = base_dataset.pu_metadata
         return wrapped
+
+    def _wrap_eval_loader_for_holisticpu(self, loader: DataLoader | None):
+        if loader is None:
+            return None
+        dataset = loader.dataset
+        if isinstance(dataset, HolisticPUEvalDatasetWrapper):
+            return loader
+        try:
+            sample_x = dataset[0][0]
+        except Exception:
+            return loader
+        is_image = isinstance(sample_x, torch.Tensor) and sample_x.ndim >= 3
+        if not is_image:
+            return loader
+
+        mean, std = self._image_normalization(self._base_train_dataset())
+        return DataLoader(
+            HolisticPUEvalDatasetWrapper(
+                dataset,
+                TransformHolisticPUEval(mean=mean, std=std),
+            ),
+            batch_size=loader.batch_size or int(self.params.get("batch_size", 64)),
+            shuffle=False,
+            num_workers=int(self.params.get("num_workers", 0)),
+            pin_memory=torch.cuda.is_available(),
+            worker_init_fn=seed_worker,
+        )
 
     def _augment_mode(self) -> str:
         dataset_class = str(self.params.get("dataset_class", "")).lower()
@@ -621,6 +682,32 @@ class HolisticPUTrainer(BaseTrainer):
         ).mean()
         return loss + loss_consistency
 
+    def _decision_diagnostics(self, loader: DataLoader) -> dict[str, float]:
+        """Score/decision summaries for diagnosing high-AUC low-F1 operating points."""
+
+        model = self.get_eval_model()
+        model.eval()
+        scores: list[np.ndarray] = []
+        preds: list[np.ndarray] = []
+        with torch.no_grad():
+            for x, *_ in loader:
+                if isinstance(x, (list, tuple)):
+                    x = x[0]
+                pred_binary, pos_score = _model_predict(model, x, self.device)
+                preds.append(pred_binary.detach().cpu().numpy())
+                scores.append(pos_score.detach().cpu().numpy())
+        if not scores:
+            return {}
+        score_arr = np.concatenate(scores).astype(float)
+        pred_arr = np.concatenate(preds).astype(float)
+        return {
+            "pred_positive_rate": float(pred_arr.mean()),
+            "positive_score_mean": float(score_arr.mean()),
+            "positive_score_q10": float(np.quantile(score_arr, 0.10)),
+            "positive_score_q50": float(np.quantile(score_arr, 0.50)),
+            "positive_score_q90": float(np.quantile(score_arr, 0.90)),
+        }
+
     def _evaluate_and_checkpoint(self, stage_epoch: int) -> dict[str, float]:
         scenario = self.params.get("scenario", "single")
         prior_calibrated_fallback = self._oracle_prior_calibrated_fallback()
@@ -641,7 +728,13 @@ class HolisticPUTrainer(BaseTrainer):
         train_proxy = evaluate_proxy_metrics(
             self.get_eval_model(), self.train_loader, self.device, self.prior, scenario
         )
-        train_metrics = {**train_oracle, **train_proxy, **self._last_phase_losses}
+        train_metrics = {
+            **train_oracle,
+            **train_proxy,
+            **self._last_phase_losses,
+            **self._decision_diagnostics(self.train_loader),
+        }
+        test_metrics.update(self._decision_diagnostics(self.test_loader))
 
         val_metrics = None
         if self.validation_loader is not None:
@@ -659,7 +752,11 @@ class HolisticPUTrainer(BaseTrainer):
                 self.prior,
                 scenario,
             )
-            val_metrics = {**val_oracle, **val_proxy}
+            val_metrics = {
+                **val_oracle,
+                **val_proxy,
+                **self._decision_diagnostics(self.validation_loader),
+            }
 
         self._print_metrics(
             stage_epoch,

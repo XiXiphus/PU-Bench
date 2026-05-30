@@ -215,9 +215,43 @@ class TransformHolisticPU:
         return self.normalize(weak_aug), self.normalize(strong_aug)
 
 
+class TransformHolisticPUEval:
+    """Deterministic evaluation transform matching the HolisticPU source scale."""
+
+    def __init__(self, mean, std):
+        self.normalize = transforms.Compose(
+            [transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)]
+        )
+
+    def __call__(self, x):
+        return self.normalize(x)
+
+
 # =============================================================================
 # HolisticPUDatasetWrapper: Dataset wrapper
 # =============================================================================
+
+
+def _image_to_pil(img):
+    if isinstance(img, Image.Image):
+        return img
+
+    if isinstance(img, torch.Tensor):
+        img = img.detach().cpu().numpy()
+    else:
+        img = np.asarray(img)
+
+    if img.ndim == 3 and img.shape[0] in [1, 3]:
+        img = np.transpose(img, (1, 2, 0))
+    if np.issubdtype(img.dtype, np.floating):
+        if np.nanmin(img) < 0.0:
+            img = (img + 1.0) / 2.0
+        img = np.clip(img, 0.0, 1.0)
+        img = (img * 255.0).round().astype(np.uint8)
+    if img.ndim == 3 and img.shape[2] == 1:
+        img = img.squeeze(2)
+
+    return Image.fromarray(img)
 
 
 class HolisticPUDatasetWrapper(Dataset):
@@ -245,30 +279,35 @@ class HolisticPUDatasetWrapper(Dataset):
         img, target, y_true, idx, u_true = self.base_dataset[index]
 
         # Ensure img is PIL Image format
-        if not isinstance(img, Image.Image):
-            # PU-Bench stores image tensors as C,H,W floats.  CIFAR is usually
-            # in [0, 1], while MNIST/FashionMNIST/Alzheimer are standardized to
-            # [-1, 1].  Convert back to PIL before applying FixMatch-style
-            # augmentations, avoiding uint8 wraparound for negative values.
-            if isinstance(img, torch.Tensor):
-                img = img.detach().cpu().numpy()
-            else:
-                img = np.asarray(img)
-
-            if img.ndim == 3 and img.shape[0] in [1, 3]:
-                img = np.transpose(img, (1, 2, 0))
-            if np.issubdtype(img.dtype, np.floating):
-                if np.nanmin(img) < 0.0:
-                    img = (img + 1.0) / 2.0
-                img = np.clip(img, 0.0, 1.0)
-                img = (img * 255.0).round().astype(np.uint8)
-            if img.ndim == 3 and img.shape[2] == 1:
-                img = img.squeeze(2)
-
-            img = Image.fromarray(img)
+        img = _image_to_pil(img)
 
         # Apply strong/weak data augmentation
         # Return (x_w, x_s) instead of x
         img_transformed = self.transform(img)
 
         return img_transformed, target, y_true, idx, u_true
+
+
+class HolisticPUEvalDatasetWrapper(Dataset):
+    """Apply source validation normalization to PU-Bench eval datasets."""
+
+    def __init__(self, base_dataset: Dataset, transform: callable):
+        self.base_dataset = base_dataset
+        self.transform = transform
+
+        self.data = getattr(base_dataset, "data", None)
+        self.targets = getattr(base_dataset, "targets", None)
+        self.features = getattr(base_dataset, "features", None)
+        self.pu_labels = getattr(base_dataset, "pu_labels", None)
+        self.true_labels = getattr(base_dataset, "true_labels", None)
+        self.indices = getattr(base_dataset, "indices", None)
+        self.pseudo_labels = getattr(base_dataset, "pseudo_labels", None)
+        self.pu_metadata = getattr(base_dataset, "pu_metadata", None)
+        self.metadata = getattr(base_dataset, "metadata", self.pu_metadata)
+
+    def __len__(self):
+        return len(self.base_dataset)
+
+    def __getitem__(self, index):
+        img, target, y_true, idx, u_true = self.base_dataset[index]
+        return self.transform(_image_to_pil(img)), target, y_true, idx, u_true
