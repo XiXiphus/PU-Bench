@@ -13,49 +13,34 @@ from torch.nn import functional as F
 
 
 class MixCNN_CIFAR10(nn.Module):
-    """Mixup-compatible CNN for CIFAR-10 (3x32x32)."""
+    """Source MixCNNCIFAR for CIFAR-10 (3x32x32).
+
+    The source CIFAR10 presets use ``mix_layer=3``.  PU-Bench keeps this
+    method-private mixable interface because the shared public CNN does not
+    expose hidden-layer mixup hooks.
+    """
 
     def __init__(self, prior: float = 0.0):
         super().__init__()
         self.prior = prior
 
-        # Decompose the original Sequential 'features' into a ModuleList
+        self.af = nn.ReLU()
+        self.conv_list = [
+            nn.Conv2d(3, 96, 3),
+            nn.Conv2d(96, 96, 3, stride=2),
+            nn.Conv2d(96, 192, 1),
+            nn.Conv2d(192, 10, 1),
+        ]
         self.layers = nn.ModuleList(
-            [
-                nn.Sequential(
-                    nn.Conv2d(3, 96, kernel_size=3, padding=1),
-                    nn.BatchNorm2d(96),
-                    nn.ReLU(inplace=True),
-                    nn.Conv2d(96, 96, kernel_size=3, padding=1),
-                    nn.BatchNorm2d(96),
-                    nn.ReLU(inplace=True),
-                ),
-                nn.Sequential(
-                    nn.Conv2d(96, 96, kernel_size=3, padding=1, stride=2),
-                    nn.BatchNorm2d(96),
-                    nn.ReLU(inplace=True),
-                    nn.Dropout(0.2),
-                    nn.Conv2d(96, 192, kernel_size=3, padding=1),
-                    nn.BatchNorm2d(192),
-                    nn.ReLU(inplace=True),
-                ),
-                nn.Sequential(
-                    nn.Conv2d(192, 192, kernel_size=3, padding=1),
-                    nn.BatchNorm2d(192),
-                    nn.ReLU(inplace=True),
-                    nn.Conv2d(192, 192, kernel_size=3, padding=1, stride=2),
-                    nn.BatchNorm2d(192),
-                    nn.ReLU(inplace=True),
-                    nn.Dropout(0.5),
-                ),
-            ]
+            [nn.Sequential(self.conv_list[i], self.af) for i in range(4)]
         )
+        self.fc1 = nn.Linear(1960, 1000)
+        self.fc2 = nn.Linear(1000, 1000)
         self.classifier_head = nn.Sequential(
-            nn.Linear(192 * 8 * 8, 1000),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.5),
-            nn.Linear(1000, 1000),
-            nn.ReLU(inplace=True),
+            self.fc1,
+            self.af,
+            self.fc2,
+            self.af,
         )
         self.final_classifier = nn.Linear(1000, 1)
 
@@ -87,7 +72,6 @@ class MixCNN_CIFAR10(nn.Module):
             if i > mix_layer:
                 h = layer_module(h)
 
-        # Classifier
         h_flat = torch.flatten(h, 1)
         features = self.classifier_head(h_flat)
         logits = self.final_classifier(features)
@@ -99,27 +83,28 @@ class MixCNN_CIFAR10(nn.Module):
 
 
 class MixLeNet(nn.Module):
-    """Mixup-compatible LeNet for MNIST/FashionMNIST (1x28x28)."""
+    """Source MixLeNet for MNIST/FashionMNIST (1x28x28)."""
 
     def __init__(self, prior: float = 0.0):
         super().__init__()
         self.prior = prior
-        self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
-        self.pool1 = nn.MaxPool2d(kernel_size=2)
-        self.relu1 = nn.ReLU()
-        self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
-        self.pool2 = nn.MaxPool2d(kernel_size=2)
-        self.relu2 = nn.ReLU()
-        self.fc1 = nn.Linear(320, 50)
-        self.relu3 = nn.ReLU()
-        self.fc2 = nn.Linear(50, 1)
+        self.conv1 = nn.Conv2d(1, 6, kernel_size=5, padding=2)
+        self.conv2 = nn.Conv2d(6, 16, kernel_size=5)
+        self.conv3 = nn.Conv2d(16, 120, kernel_size=5)
+        self.bn_conv1 = nn.BatchNorm2d(6)
+        self.bn_conv2 = nn.BatchNorm2d(16)
+        self.mp = nn.MaxPool2d(2)
+        self.relu = nn.ReLU()
+        self.fc1 = nn.Linear(120, 84)
+        self.bn_fc1 = nn.BatchNorm1d(84)
 
-        self.layer1 = nn.Sequential(self.conv1, self.pool1, self.relu1)
-        self.layer2 = nn.Sequential(self.conv2, self.pool2, self.relu2)
-        self.layers = nn.ModuleList([self.layer1, self.layer2])
+        self.layer1 = nn.Sequential(self.conv1, self.mp, self.relu)
+        self.layer2 = nn.Sequential(self.conv2, self.mp, self.relu)
+        self.layer3 = nn.Sequential(self.conv3, self.relu)
+        self.layers = nn.ModuleList([self.layer1, self.layer2, self.layer3])
 
-        self.classifier_head = nn.Sequential(self.fc1, self.relu3)
-        self.final_classifier = self.fc2
+        self.classifier_head = nn.Sequential(self.fc1, self.bn_fc1, self.relu)
+        self.final_classifier = nn.Linear(84, 1)
 
     def forward(
         self,

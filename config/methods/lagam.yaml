@@ -2,7 +2,28 @@ lagam:
   metadata:
     method_key: "lagam"
     trainer_key: "lagam"
-  # Source estimator loop with LaGAM-private meta backbones and benchmark-adapted schedule.
+    alignment:
+      level: "source_faithful_kernel_benchmark_wrapper"
+      source_reproduction: false
+      claim_note: "PU-Bench keeps the LaGAM meta-label correction, mixup, contrastive clustering, source CIFAR10 optimizer/stage preset, and proxy checkpointing inside the benchmark runner."
+      source_references:
+        - "methods_source/repos/lagam/README.md"
+        - "methods_source/repos/lagam/train.py"
+        - "methods_source/repos/lagam/utils/utils_data.py"
+        - "methods_source/repos/lagam/models/resnet.py"
+      retained_source_components:
+        - "CIFAR10-1 positive class list [0,1,8,9], n_positive=1000, n_valid=500, and 400-epoch source schedule"
+        - "meta-label correction through classifier-identified MetaModule parameters"
+        - "beta(4,4) mixup, source BCE soft-label loss, contrastive clustering, cont_cutoff, and kNN augmentation"
+        - "source SGD optimizer, milestone LR schedule, rho update range, and all-unlabeled batch skip"
+      benchmark_adaptations:
+        - "checkpoint monitor is val_proxy_acc instead of source test accuracy"
+        - "source FAISS k-means is replaced by sklearn KMeans because faiss is not a benchmark dependency"
+        - "validation/test logging follows the PU-Bench result schema"
+      known_gaps:
+        - "source README only exposes CIFAR10/CIFAR100/STL10 commands; only CIFAR10 intersects the active Bench datasets"
+        - "PU-Bench source-style CIFAR10 validation uses binary stratification from shared loaders rather than source per-original-class validation slicing"
+  # Source estimator loop with LaGAM-private meta backbones and benchmark-adapted runner.
   # Official code: llong-cs/LaGAM @ 362a7f41fcf3d4e4161fe99f4aab4e6128b6a5d8.
   optimizer: "sgd"
   lr: 0.001
@@ -25,9 +46,58 @@ lagam:
   meta_lr: 0.001
   rho_start: 0.95
   rho_end: 0.8
+  lr_decay_epochs: [250, 300, 350]
+  lr_decay_rate: 0.1
+  cosine: false
+  use_source_lr_schedule: false
 
   # This ratio is used if the dataset config does not provide a validation set
   lagam_val_ratio: 0.1
+
+  use_source_hparams_by_dataset: true
+  source_hparams_by_dataset:
+    cifar10:
+      source_preset: "cifar10-1"
+      source_dataset: "cifar10"
+      source_positive_label_list: [0, 1, 8, 9]
+      source_negative_label_list: [2, 3, 4, 5, 6, 7]
+      source_num_labeled: 1000
+      source_num_valid: 500
+      source_epochs: 400
+      source_warmup_epoch: 20
+      source_num_cluster: 5
+      optimizer: "sgd"
+      lr: 0.001
+      weight_decay: 0.0001
+      momentum: 0.9
+      batch_size: 64
+      num_epochs: 400
+      warmup_epoch: 20
+      num_cluster: 5
+      temperature: 0.07
+      cont_cutoff: true
+      knn_aug: true
+      num_neighbors: 10
+      identifier: "classifier"
+      contrastive_clustering: 1
+      cont_weight: 1.0
+      mix_weight: 1.0
+      meta_lr: 0.001
+      rho_start: 0.95
+      rho_end: 0.8
+      lr_decay_epochs: [250, 300, 350]
+      lr_decay_rate: 0.1
+      cosine: false
+      use_source_lr_schedule: true
+      checkpoint:
+        enabled: true
+        save_model: false
+        monitor: "val_proxy_acc"
+        mode: "max"
+        early_stopping:
+          enabled: false
+          patience: 25
+          min_delta: 0.0001
 
   label_scheme:
     true_positive_label: 1

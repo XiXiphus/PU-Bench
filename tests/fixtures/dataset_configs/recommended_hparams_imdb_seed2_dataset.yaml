@@ -1,0 +1,13 @@
+dataset_class: IMDB
+data_dir: ./datasets
+random_seeds: [2]
+c_values: [0.1]
+scenarios: [case-control]
+selection_strategies: ["random"]
+val_ratio: 0.01
+target_prevalence: null
+with_replacement: true
+also_print_dataset_stats: false
+sbert_model_name: all-MiniLM-L6-v2
+sbert_model_path: ./scripts/models/all-MiniLM-L6-v2
+sbert_embeddings_path: ./scripts/embeddings/imdb_sbert_embeddings.npz

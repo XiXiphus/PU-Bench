@@ -2,11 +2,102 @@ vaepu:
   metadata:
     method_key: "vaepu"
     trainer_key: "vaepu"
+    alignment:
+      level: "source_adapted_tensorflow_to_pytorch_benchmark_wrapper"
+      source_reproduction: false
+      source_references:
+        - "methods_source/repos/vaepu/README.md"
+        - "methods_source/repos/vaepu/config.py"
+        - "methods_source/repos/vaepu/main.py"
+        - "methods_source/repos/vaepu/model.py"
+        - "methods_source/repos/vaepu/train.py"
+      retained_source_components:
+        - "three-stage VAE pretraining, GMM prior estimation, and adversarial VAE/PN training loop"
+        - "source MNIST_35_val flat MLP recipe from main.py"
+        - "source README random-labeling alpha coefficients for MNIST_35, CIFAR-10, and 20News"
+        - "source PN sigmoid-risk objective with generated PU examples"
+      benchmark_adaptations:
+        - "TensorFlow eager source implementation is ported to PyTorch"
+        - "PU-Bench controlled splits and empirical split priors replace source npz constants pi_pl=0.01, pi_pu=0.49, and pi_u=0.99"
+        - "checkpoint selection uses val_proxy_acc; oracle/test labels remain diagnostics only"
+        - "CIFAR10 and 20News entries preserve the explicit source alpha coefficients while using benchmark-compatible schedule/backbone adapters where the source snapshot does not provide a full runnable dataset script"
+      modality_alignment:
+        mnist: "source_main_py_flat_mlp_recipe"
+        cifar10: "source_readme_alpha_table_with_benchmark_image_adapter"
+        20news: "source_readme_alpha_table_with_benchmark_vector_adapter"
+      known_limitations:
+        - "CIFAR10 and 20News source entries are alpha-table recipes, not exact source-script reproductions"
+        - "MNIST uses the source architecture and training schedule on the PU-Bench controlled split; source npz mixture constants are recorded as source_pi_* and not used to override Bench split priors"
+        - "source validation in train.py uses oracle labels; PU-Bench keeps validation control on proxy_acc"
+
   # Basic settings - these parameters are common to all datasets
   seed: 42
 
   # Adaptive configuration flag - trainer will automatically adjust hyperparameters based on dataset type
   adaptive_config: true
+  use_source_hparams_by_dataset: true
+  source_hparams_by_dataset:
+    mnist:
+      source_dataset: "MNIST_35_val"
+      source_script: "main.py"
+      source_recipe_scope: "source_main_py_full_mnist35_random_labeling_recipe"
+      source_pi_pl: 0.01
+      source_pi_pu: 0.49
+      source_pi_u: 0.99
+      bench_prior_adapter: "split_metadata_pi_weights"
+      adaptive_config: false
+      mnist_source_recipe: true
+      pn_decision_threshold: 0.0
+      threshold_selection: "fixed"
+      batch_size_l: 10
+      batch_size_u: 990
+      batch_size_l_pn: 10
+      batch_size_u_pn: 990
+      batch_size_val: 100
+      batch_size_test: 100
+      n_hidden_vae_e: [500, 500]
+      n_h_y: 10
+      n_h_o: 2
+      n_hidden_vae_d: [500, 500]
+      n_o: 2
+      n_hidden_disc: [256]
+      n_hidden_cl: []
+      n_hidden_pn: [300, 300, 300, 300]
+      alpha_gen: 0.1
+      alpha_disc: 0.1
+      alpha_gen2: 3.0
+      alpha_disc2: 3.0
+      alpha_vade: 1.0
+      lr_pu: 0.0003
+      lr_disc: 0.0003
+      lr_pn: 0.00001
+      beta1: 0.9
+      beta2: 0.999
+      mode: "near_o"
+      k_gan: 1
+      bool_pn_pre: false
+      num_epoch_pre: 100
+      num_epoch: 800
+      num_epoch_step1: 400
+      num_epoch_step2: 500
+      num_epoch_step3: 700
+      num_epoch_step_pn1: 500
+      num_epoch_step_pn2: 600
+  source_partial_hparams_by_dataset:
+    cifar10:
+      source_dataset: "CIFAR-10"
+      source_recipe_scope: "source_readme_random_labeling_alpha_table_only"
+      alpha_gen: 0.3
+      alpha_disc: 0.3
+      alpha_gen2: 1.0
+      alpha_disc2: 1.0
+    20news:
+      source_dataset: "20News"
+      source_recipe_scope: "source_readme_random_labeling_alpha_table_only"
+      alpha_gen: 0.01
+      alpha_disc: 0.01
+      alpha_gen2: 1.0
+      alpha_disc2: 1.0
 
   # Default checkpoint settings - can be overridden by dataset-specific configuration
   checkpoint:

@@ -16,14 +16,17 @@ vpu:
         - "separate labeled-positive P loader and all-training-data X loader"
         - "log-phi variational objective using output column 1"
         - "mixup regularizer weighted by configured lam"
+        - "source README dataset-specific lr/lam/num_labeled recipes where PU-Bench has the corresponding dataset"
         - "Adam betas (0.5, 0.99)"
         - "30 source iterations per epoch"
         - "20-epoch learning-rate halving with optimizer reset"
-        - "validation variational loss model-selection signal"
+        - "validation variational loss is retained as a diagnostic source metric"
         - "no prior-bias initialization"
       benchmark_adaptations:
         - "PU-Bench public backbone and controlled dataset splits"
+        - "PU-Bench recommended dataset recipes are recorded separately from source recipes when source hyperparameters are unavailable"
         - "PU-Bench checkpointing, proxy metrics, and result schema"
+        - "checkpoint monitor val_proxy_acc instead of source validation variational loss to satisfy PU-Bench proxy-metric checkpoint policy"
         - "binary log-softmax adapter for single-logit benchmark backbones"
         - "safe positive-batch resampling when benchmark P batches are smaller than X batches"
         - "unified benchmark oracle/proxy metrics rather than the source-script normalized test decision rule"
@@ -42,6 +45,60 @@ vpu:
   mix_alpha: 0.3
   lam: 0.03
   val_iterations: 30
+  use_source_hparams_by_dataset: true
+  source_hparams_by_dataset:
+    cifar10:
+      lr: 0.00003
+      lam: 0.03
+      source_num_labeled: 3000
+    fashionmnist:
+      lr: 0.0003
+      lam: 0.3
+      source_num_labeled: 3000
+  use_recommended_hparams_by_dataset: true
+  recommended_hparams_by_dataset:
+    mnist:
+      recommended_preset: "mnist_fashionmnist_style"
+      recommended_basis: "source FashionMNIST lr/lam recipe used as a MNIST grayscale-image recommended candidate"
+      lr: 0.0003
+      lam: 0.3
+      batch_size: 500
+      num_epochs: 50
+    alzheimermri:
+      recommended_preset: "image_fashionmnist_style_memory_capped"
+      recommended_basis: "source FashionMNIST lr/lam recipe with PU-Bench memory-capped batch size recorded as an AlzheimerMRI image recommended candidate"
+      lr: 0.0003
+      lam: 0.3
+      batch_size: 64
+      num_epochs: 50
+    imdb:
+      recommended_preset: "vector_source_grid_style"
+      recommended_basis: "source vector grid lr/lam recipe recorded as an IMDB SBERT recommended candidate"
+      lr: 0.0003
+      lam: 0.1
+      batch_size: 500
+      num_epochs: 50
+    20news:
+      recommended_preset: "vector_source_grid_style"
+      recommended_basis: "Bench recommended 20News SBERT candidate; the source does not provide a 20News recipe, so this reuses source vector-grid lr/lam constants"
+      lr: 0.0003
+      lam: 0.1
+      batch_size: 500
+      num_epochs: 50
+    spambase:
+      recommended_preset: "vector_source_grid_style"
+      recommended_basis: "source vector grid lr/lam recipe recorded as a Spambase recommended candidate"
+      lr: 0.0003
+      lam: 0.1
+      batch_size: 500
+      num_epochs: 50
+    connect4:
+      recommended_preset: "vector_source_grid_style"
+      recommended_basis: "source vector grid lr/lam recipe recorded as a Connect4 recommended candidate"
+      lr: 0.0003
+      lam: 0.1
+      batch_size: 500
+      num_epochs: 50
   vpu_lr_decay_every: 20
   vpu_lr_decay_factor: 0.5
   vpu_reset_optimizer_on_lr_decay: true
@@ -53,8 +110,8 @@ vpu:
   checkpoint:
     enabled: true
     save_model: false
-    monitor: "val_vpu_var_loss"
-    mode: "min"
+    monitor: "val_proxy_acc"
+    mode: "max"
     early_stopping:
       enabled: false
       patience: 10

@@ -280,7 +280,9 @@ class VAEPUTrainer(BaseTrainer):
                     "num_epoch_step3": 480,
                 }
             )
-            self.console.log("🖼️ Applied CIFAR-10 config from paper", style="blue")
+            self.console.log(
+                "🖼️ Applied CIFAR-10 alpha-guided benchmark config", style="blue"
+            )
             return True
 
         elif "20news" in dataset_name or "newsgroups" in dataset_name:
@@ -309,7 +311,9 @@ class VAEPUTrainer(BaseTrainer):
                     "num_epoch_step_pn2": 140,
                 }
             )
-            self.console.log("📰 Applied 20News config from paper", style="blue")
+            self.console.log(
+                "📰 Applied 20News alpha-guided benchmark config", style="blue"
+            )
             return True
 
         elif "imdb" in dataset_name:
@@ -443,7 +447,7 @@ class VAEPUTrainer(BaseTrainer):
         )
 
     def _apply_mnist_config(self):
-        """MNIST specific config from paper"""
+        """MNIST source-style config."""
         self.params.update(
             {
                 "n_h_y": 100,
@@ -457,7 +461,7 @@ class VAEPUTrainer(BaseTrainer):
         )
 
     def _apply_cifar_config(self):
-        """CIFAR-10 specific config from paper"""
+        """CIFAR-10 alpha-guided benchmark config."""
         self.params.update(
             {
                 "alpha_gen": 0.3,
@@ -469,7 +473,7 @@ class VAEPUTrainer(BaseTrainer):
         )
 
     def _apply_text_config(self):
-        """Optimized config for text datasets based on 20News paper"""
+        """Text benchmark config using source 20News alpha constants."""
         self.params.update(
             {
                 "n_hidden_vae_e": [512, 256],
@@ -670,6 +674,10 @@ class VAEPUTrainer(BaseTrainer):
     def reparameterization(self, mu, lss):
         eps = torch.randn_like(mu)
         return mu + torch.exp(lss / 2.0) * eps
+
+    @staticmethod
+    def _source_sigmoid_loss(t: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        return torch.sigmoid(-t * y)
 
     def _uses_binary_image_likelihood(self) -> bool:
         return (
@@ -1156,9 +1164,9 @@ class VAEPUTrainer(BaseTrainer):
         if epoch > self.step1_end:
             d_x_pu2 = self.model(self._pn_input(x_pu))
             pos_logit = self._pn_pos_logit(d_x_pu2)
-            loss_gan2 = F.binary_cross_entropy_with_logits(
+            loss_gan2 = self._source_sigmoid_loss(
                 pos_logit, torch.ones_like(pos_logit)
-            )
+            ).mean()
 
         total_loss = (
             vade_loss
@@ -1188,15 +1196,18 @@ class VAEPUTrainer(BaseTrainer):
         pn_x_pu = self._pn_pos_logit(self.model(self._pn_input(x_pu.detach())))
         pn_x_u = self._pn_pos_logit(self.model(self._pn_input(x_u)))
 
-        def sigmoid_loss(t, y):
-            return torch.sigmoid(-t * y)
-
-        pl_loss = (pi_pl * sigmoid_loss(pn_x_pl, torch.ones_like(pn_x_pl))).mean()
-        pu1_loss = (pi_pu * sigmoid_loss(pn_x_pu, torch.ones_like(pn_x_pu))).mean()
+        pl_loss = (
+            pi_pl * self._source_sigmoid_loss(pn_x_pl, torch.ones_like(pn_x_pl))
+        ).mean()
+        pu1_loss = (
+            pi_pu * self._source_sigmoid_loss(pn_x_pu, torch.ones_like(pn_x_pu))
+        ).mean()
 
         negative_risk = (
-            -pi_pu * sigmoid_loss(pn_x_pu, -torch.ones_like(pn_x_pu))
-        ).mean() + (pi_u * sigmoid_loss(pn_x_u, -torch.ones_like(pn_x_u))).mean()
+            -pi_pu * self._source_sigmoid_loss(pn_x_pu, -torch.ones_like(pn_x_pu))
+        ).mean() + (
+            pi_u * self._source_sigmoid_loss(pn_x_u, -torch.ones_like(pn_x_u))
+        ).mean()
 
         if negative_risk < 0:
             loss = -negative_risk

@@ -29,11 +29,14 @@ import torch.nn.functional as F
 from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.data import DataLoader, Subset
 
-from backbone.ema import ModelEMA
-
 from ..base_trainer import BaseTrainer
 from ..schedules import sigmoid_rampup
 from .model_selector import select_model
+from .source_adapter import (
+    create_p3mix_source_ema,
+    install_p3mix_source_input_adapters,
+    p3mix_loader_kwargs,
+)
 
 
 class P3MIXCTrainer(BaseTrainer):
@@ -88,6 +91,7 @@ class P3MIXCTrainer(BaseTrainer):
 
     def _prepare_p3mix_data(self):
         """Overrides BaseTrainer._prepare_data to create separate P and U loaders."""
+        install_p3mix_source_input_adapters(self)
         # The base trainer's self.train_loader contains the full dataset
         full_train_dataset = self.train_loader.dataset
 
@@ -104,14 +108,30 @@ class P3MIXCTrainer(BaseTrainer):
         u_dataset = Subset(full_train_dataset, unlabeled_indices)
 
         batch_size = self.params.get("batch_size", 128)
+        drop_last = bool(self.params.get("source_loader_drop_last", False))
+        loader_kwargs = p3mix_loader_kwargs(self.params)
         self.p_loader = DataLoader(
-            p_dataset, batch_size=batch_size, shuffle=True, drop_last=False
+            p_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            drop_last=drop_last,
+            **loader_kwargs,
         )
         self.u_loader = DataLoader(
-            u_dataset, batch_size=batch_size, shuffle=True, drop_last=False
+            u_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            drop_last=drop_last,
+            **loader_kwargs,
         )
         # Loader for updating the hard positive pool (no shuffle)
-        self.p_update_loader = DataLoader(p_dataset, batch_size=1000, shuffle=False)
+        self.p_update_loader = DataLoader(
+            p_dataset,
+            batch_size=1000,
+            shuffle=False,
+            drop_last=False,
+            **loader_kwargs,
+        )
 
     def _build_p3mix_model(self):
         """Initializes model, EMA model, optimizer, and scheduler for P3MIX."""
@@ -181,7 +201,7 @@ class P3MIXCTrainer(BaseTrainer):
 
         # EMA model
         if self.use_ema:
-            self.ema_model = ModelEMA(self, self.model, decay=self.ema_decay)
+            self.ema_model = create_p3mix_source_ema(self.create_model, self.device)
         else:
             self.ema_model = None
 

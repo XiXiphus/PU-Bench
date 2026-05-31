@@ -24,6 +24,7 @@ selfpu:
         - "source nnPU negative-risk training scalar for noisy branches"
         - "source self-calibration inner step lr=0.001 and gamma budget=1/16"
         - "source train batch size and four-worker pinned loader default"
+        - "source train_2s2t_mix.py MNIST and CIFAR-10 command recipes when the PU-Bench dataset matches"
         - "no prior-bias initialization"
       benchmark_adaptations:
         - "PU-Bench controlled dataset splits with shared public backbones"
@@ -32,6 +33,7 @@ selfpu:
         - "PU-Bench checkpointing, proxy metrics, and result schema"
         - "validation monitor val_proxy_acc instead of source-script test accuracy model selection"
         - "benchmark dataset object contract instead of author MNIST/CIFAR-only dataset factory"
+        - "PU-Bench recommended dataset recipes are recorded separately from source recipes when source train_2s2t_mix.py hyperparameters are unavailable"
   # Controlled PU-Bench entry for VITA-Group/Self-PU train_2s2t_mix.py.
   # The source meta target uses test inputs; PU-Bench replaces that with
   # validation/train unlabeled inputs to avoid transductive test-input leakage.
@@ -79,6 +81,254 @@ selfpu:
   consistency_rampup: 400
   selfpu_type: "mu"
   mutual_alpha: 0.1
+  use_source_hparams_by_dataset: true
+  source_hparams_by_dataset:
+    mnist:
+      source_preset: "train_2s2t_mix_mnist_soft_label"
+      source_dataset: "mnist"
+      source_num_labeled: 1000
+      source_unlabeled: 60000
+      optimizer: "adam"
+      lr: 0.0005
+      weight_decay: 0.005
+      batch_size: 256
+      num_epochs: 200
+      num_workers: 4
+      self_paced_enabled: true
+      self_paced_start: 10
+      self_paced_stop: 50
+      self_paced_frequency: 10
+      self_paced_rampup: 100
+      self_paced_top_p1: 0.4
+      self_paced_top_p2: 0.6
+      soft_label: true
+      replacement: true
+      increasing: true
+      flex_ratio: 0.0
+      self_calibration_enabled: true
+      self_calibration_inner_lr: 0.001
+      self_calibration_gamma: 0.0625
+      mean_teacher_enabled: true
+      mean_teacher_start: 50
+      ema_decay: 0.999
+      consistency_weight: 0.3
+      consistency_rampup: 400
+      selfpu_type: "mu"
+      mutual_alpha: 0.1
+    cifar10:
+      source_preset: "train_2s2t_mix_cifar_soft_label"
+      source_dataset: "cifar"
+      source_num_labeled: 1000
+      source_unlabeled: 50000
+      optimizer: "adam"
+      lr: 0.0005
+      weight_decay: 0.005
+      batch_size: 256
+      num_epochs: 200
+      num_workers: 4
+      self_paced_enabled: true
+      self_paced_start: 10
+      self_paced_stop: 50
+      self_paced_frequency: 10
+      self_paced_rampup: 100
+      self_paced_top_p1: 0.4
+      self_paced_top_p2: 0.6
+      soft_label: true
+      replacement: true
+      increasing: true
+      flex_ratio: 0.0
+      self_calibration_enabled: true
+      self_calibration_inner_lr: 0.001
+      self_calibration_gamma: 0.0625
+      mean_teacher_enabled: true
+      mean_teacher_start: 50
+      ema_decay: 0.999
+      consistency_weight: 0.3
+      consistency_rampup: 400
+      selfpu_type: "mu"
+      mutual_alpha: 0.1
+  use_recommended_hparams_by_dataset: true
+  recommended_hparams_by_dataset:
+    fashionmnist:
+      recommended_preset: "fashionmnist_mnist_source_schedule"
+      recommended_basis: "source Self-PU MNIST train_2s2t_mix.py optimizer, 200-epoch schedule, self-calibration, and mean-teacher settings used as a FashionMNIST grayscale-image recommended candidate"
+      optimizer: "adam"
+      lr: 0.0005
+      weight_decay: 0.005
+      batch_size: 256
+      num_epochs: 200
+      num_workers: 4
+      self_paced_enabled: true
+      self_paced_start: 10
+      self_paced_stop: 50
+      self_paced_frequency: 10
+      self_paced_rampup: 100
+      self_paced_top_p1: 0.4
+      self_paced_top_p2: 0.6
+      soft_label: true
+      replacement: true
+      increasing: true
+      flex_ratio: 0.0
+      self_calibration_enabled: true
+      self_calibration_inner_lr: 0.001
+      self_calibration_gamma: 0.0625
+      mean_teacher_enabled: true
+      mean_teacher_start: 50
+      ema_decay: 0.999
+      consistency_weight: 0.3
+      consistency_rampup: 400
+      selfpu_type: "mu"
+      mutual_alpha: 0.1
+    alzheimermri:
+      recommended_preset: "image_source_schedule_memory_capped"
+      recommended_basis: "source Self-PU image optimizer, 200-epoch schedule, self-calibration, and mean-teacher settings with batch size capped for the 128x128 AlzheimerMRI public backbone"
+      optimizer: "adam"
+      lr: 0.0005
+      weight_decay: 0.005
+      batch_size: 64
+      num_epochs: 200
+      num_workers: 4
+      self_paced_enabled: true
+      self_paced_start: 10
+      self_paced_stop: 50
+      self_paced_frequency: 10
+      self_paced_rampup: 100
+      self_paced_top_p1: 0.4
+      self_paced_top_p2: 0.6
+      soft_label: true
+      replacement: true
+      increasing: true
+      flex_ratio: 0.0
+      self_calibration_enabled: true
+      self_calibration_inner_lr: 0.001
+      self_calibration_gamma: 0.0625
+      mean_teacher_enabled: true
+      mean_teacher_start: 50
+      ema_decay: 0.999
+      consistency_weight: 0.3
+      consistency_rampup: 400
+      selfpu_type: "mu"
+      mutual_alpha: 0.1
+    imdb:
+      recommended_preset: "vector_source_schedule"
+      recommended_basis: "source Self-PU train_2s2t_mix.py optimizer, 200-epoch schedule, self-calibration, and mean-teacher settings used with the benchmark vector extension as an IMDB SBERT recommended candidate"
+      optimizer: "adam"
+      lr: 0.0005
+      weight_decay: 0.005
+      batch_size: 256
+      num_epochs: 200
+      num_workers: 4
+      self_paced_enabled: true
+      self_paced_start: 10
+      self_paced_stop: 50
+      self_paced_frequency: 10
+      self_paced_rampup: 100
+      self_paced_top_p1: 0.4
+      self_paced_top_p2: 0.6
+      soft_label: true
+      replacement: true
+      increasing: true
+      flex_ratio: 0.0
+      self_calibration_enabled: true
+      self_calibration_inner_lr: 0.001
+      self_calibration_gamma: 0.0625
+      mean_teacher_enabled: true
+      mean_teacher_start: 50
+      ema_decay: 0.999
+      consistency_weight: 0.3
+      consistency_rampup: 400
+      selfpu_type: "mu"
+      mutual_alpha: 0.1
+    20news:
+      recommended_preset: "vector_source_schedule"
+      recommended_basis: "Bench recommended 20News SBERT candidate; the source does not provide a 20News recipe, so this reuses Self-PU source optimizer/schedule constants through the benchmark vector extension"
+      optimizer: "adam"
+      lr: 0.0005
+      weight_decay: 0.005
+      batch_size: 256
+      num_epochs: 200
+      num_workers: 4
+      self_paced_enabled: true
+      self_paced_start: 10
+      self_paced_stop: 50
+      self_paced_frequency: 10
+      self_paced_rampup: 100
+      self_paced_top_p1: 0.4
+      self_paced_top_p2: 0.6
+      soft_label: true
+      replacement: true
+      increasing: true
+      flex_ratio: 0.0
+      self_calibration_enabled: true
+      self_calibration_inner_lr: 0.001
+      self_calibration_gamma: 0.0625
+      mean_teacher_enabled: true
+      mean_teacher_start: 50
+      ema_decay: 0.999
+      consistency_weight: 0.3
+      consistency_rampup: 400
+      selfpu_type: "mu"
+      mutual_alpha: 0.1
+    spambase:
+      recommended_preset: "vector_source_schedule"
+      recommended_basis: "source Self-PU train_2s2t_mix.py optimizer, 200-epoch schedule, self-calibration, and mean-teacher settings used with the benchmark tabular extension as a Spambase recommended candidate"
+      optimizer: "adam"
+      lr: 0.0005
+      weight_decay: 0.005
+      batch_size: 256
+      num_epochs: 200
+      num_workers: 4
+      self_paced_enabled: true
+      self_paced_start: 10
+      self_paced_stop: 50
+      self_paced_frequency: 10
+      self_paced_rampup: 100
+      self_paced_top_p1: 0.4
+      self_paced_top_p2: 0.6
+      soft_label: true
+      replacement: true
+      increasing: true
+      flex_ratio: 0.0
+      self_calibration_enabled: true
+      self_calibration_inner_lr: 0.001
+      self_calibration_gamma: 0.0625
+      mean_teacher_enabled: true
+      mean_teacher_start: 50
+      ema_decay: 0.999
+      consistency_weight: 0.3
+      consistency_rampup: 400
+      selfpu_type: "mu"
+      mutual_alpha: 0.1
+    connect4:
+      recommended_preset: "vector_source_schedule"
+      recommended_basis: "source Self-PU train_2s2t_mix.py optimizer, 200-epoch schedule, self-calibration, and mean-teacher settings used with the benchmark tabular extension as a Connect4 recommended candidate"
+      optimizer: "adam"
+      lr: 0.0005
+      weight_decay: 0.005
+      batch_size: 256
+      num_epochs: 200
+      num_workers: 4
+      self_paced_enabled: true
+      self_paced_start: 10
+      self_paced_stop: 50
+      self_paced_frequency: 10
+      self_paced_rampup: 100
+      self_paced_top_p1: 0.4
+      self_paced_top_p2: 0.6
+      soft_label: true
+      replacement: true
+      increasing: true
+      flex_ratio: 0.0
+      self_calibration_enabled: true
+      self_calibration_inner_lr: 0.001
+      self_calibration_gamma: 0.0625
+      mean_teacher_enabled: true
+      mean_teacher_start: 50
+      ema_decay: 0.999
+      consistency_weight: 0.3
+      consistency_rampup: 400
+      selfpu_type: "mu"
+      mutual_alpha: 0.1
 
   label_scheme:
     true_positive_label: 1

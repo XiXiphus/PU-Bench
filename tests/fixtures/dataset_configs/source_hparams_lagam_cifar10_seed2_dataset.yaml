@@ -1,0 +1,14 @@
+dataset_class: CIFAR10
+data_dir: ./datasets
+random_seeds: [2]
+c_values: [0.05]
+scenarios: [single]
+selection_strategies: ["random"]
+n_labeled: 1000
+val_ratio: 0.01
+target_prevalence: null
+with_replacement: false
+also_print_dataset_stats: false
+label_scheme:
+  positive_classes: [0, 1, 8, 9]
+  negative_classes: [2, 3, 4, 5, 6, 7]

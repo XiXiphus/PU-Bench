@@ -17,6 +17,7 @@ nnpusb:
       retained_source_components:
         - "selected-bias positives use the source mean-normalize then max-normalize accept-reject rule when SAR-PUSB selection is requested"
         - "logistic nnPU risk with beta=0 and gamma=1 equivalent to source negative-risk correction"
+        - "source main_nnPUSB_mnist.py optimizer and schedule recipe for MNIST"
         - "PU labels +1 for labeled positives and source unlabeled label 0 mapped to PU-Bench -1"
         - "risk prior is the positive fraction inside U"
         - "Adam optimizer family"
@@ -25,7 +26,8 @@ nnpusb:
       benchmark_adaptations:
         - "PyTorch port of the Chainer source implementation"
         - "PU-Bench public backbone and controlled dataset splits"
-        - "PU-Bench learning rate, weight decay, batch size, and epoch budget"
+        - "PU-Bench fallback learning rate, weight decay, batch size, and epoch budget for source-unsupported datasets"
+        - "PU-Bench recommended dataset recipes are recorded separately from source recipes when source hyperparameters are unavailable"
         - "PU-Bench checkpointing, proxy metrics, and result schema"
         - "validation monitor val_proxy_acc instead of source test accuracy and quantile-evaluation logging"
         - "selected-bias scores come from a PU-Bench PN scorer on the benchmark split instead of the source pretraining MLP on concatenated MNIST train/test"
@@ -42,6 +44,68 @@ nnpusb:
   seed: 42
   gamma: 1.0
   beta: 0.0
+  use_source_hparams_by_dataset: true
+  source_hparams_by_dataset:
+    mnist:
+      lr: 0.00001
+      weight_decay: 0.005
+      batch_size: 1000
+      num_epochs: 100
+      source_preset: "main_nnPUSB_mnist"
+      source_num_labeled: 1000
+      source_selection_bias_pretrain_epochs: 100
+      source_selection_bias_pretrain_lr: 0.00001
+  use_recommended_hparams_by_dataset: true
+  recommended_hparams_by_dataset:
+    alzheimermri:
+      recommended_preset: "image_default_baseline"
+      recommended_basis: "PU-Bench nnPUSB fallback optimizer recipe recorded as an AlzheimerMRI recommended candidate"
+      lr: 0.0003
+      weight_decay: 0.0001
+      batch_size: 256
+      num_epochs: 40
+    cifar10:
+      recommended_preset: "cifar10_nnpu_style"
+      recommended_basis: "source nnPUSB optimizer scale plus nnPU exp-cifar public-backbone recipe used as a CIFAR10 recommended candidate"
+      lr: 0.00001
+      weight_decay: 0.005
+      batch_size: 500
+      num_epochs: 100
+    fashionmnist:
+      recommended_preset: "fashionmnist_mnist_style"
+      recommended_basis: "source main_nnPUSB_mnist optimizer recipe used as a FashionMNIST recommended candidate"
+      lr: 0.00001
+      weight_decay: 0.005
+      batch_size: 1000
+      num_epochs: 100
+    imdb:
+      recommended_preset: "text_embedding_default_baseline"
+      recommended_basis: "PU-Bench nnPUSB fallback optimizer recipe recorded as an IMDB SBERT recommended candidate"
+      lr: 0.0003
+      weight_decay: 0.0001
+      batch_size: 256
+      num_epochs: 40
+    20news:
+      recommended_preset: "text_embedding_default_baseline"
+      recommended_basis: "Bench recommended 20News SBERT candidate; the source does not provide a 20News recipe, so this uses the PU-Bench nnPUSB fallback optimizer recipe"
+      lr: 0.0003
+      weight_decay: 0.0001
+      batch_size: 256
+      num_epochs: 40
+    spambase:
+      recommended_preset: "tabular_default_baseline"
+      recommended_basis: "PU-Bench nnPUSB fallback optimizer recipe recorded as a Spambase recommended candidate"
+      lr: 0.0003
+      weight_decay: 0.0001
+      batch_size: 256
+      num_epochs: 40
+    connect4:
+      recommended_preset: "tabular_default_baseline"
+      recommended_basis: "PU-Bench nnPUSB fallback optimizer recipe recorded as a Connect4 recommended candidate"
+      lr: 0.0003
+      weight_decay: 0.0001
+      batch_size: 256
+      num_epochs: 40
   init_bias_from_prior: false
   label_scheme:
     true_positive_label: 1

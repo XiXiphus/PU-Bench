@@ -17,6 +17,7 @@ distpu:
         - "mixup stage initialized from source-style pseudo labels"
         - "polar proxy label-distribution loss with L1 histogram distance"
         - "source coefficients co_mu, co_entropy, co_mix_entropy, co_mixup, and alpha"
+        - "source train.py dataset choices cifar-10, fmnist, and alzheimer share the same optimizer/schedule defaults"
         - "cosine annealing schedules for warm-up and mixup stages"
         - "mixup-stage pseudo-label refresh from model scores"
         - "source train/test batch sizes and eight-worker loader default"
@@ -27,6 +28,7 @@ distpu:
         - "PU-Bench checkpointing, proxy metrics, and result schema"
         - "validation monitor val_proxy_acc instead of source-script test accuracy logging"
         - "benchmark dataset object contract instead of author CIFAR/FashionMNIST/Alzheimer dataset factory"
+        - "PU-Bench recommended dataset recipes are recorded separately from source recipes when source train.py hyperparameters are unavailable"
   # Source-aligned Dist-PU package: train/distpu/.
   # Author source file(s): distpu at cb74be1a87176fd38270873c06374e53905b7354.
   optimizer: "adam"
@@ -37,6 +39,162 @@ distpu:
   num_workers: 8
   pin_memory: true
   seed: 42
+  use_source_hparams_by_dataset: true
+  source_hparams_by_dataset:
+    cifar10:
+      source_dataset: "cifar-10"
+      source_num_labeled: 1000
+      batch_size: 256
+      test_batch_size: 128
+      stages:
+        warm_up:
+          epochs: 60
+          lr: 0.0005
+          weight_decay: 0.005
+          co_mu: 0.002
+        mixup:
+          epochs: 60
+          lr: 0.00005
+          weight_decay: 0.001
+          alpha: 6.0
+          co_entropy: 0.004
+          co_mix_entropy: 0.04
+          co_mixup: 5.0
+    fashionmnist:
+      source_dataset: "fmnist"
+      source_num_labeled: 1000
+      batch_size: 256
+      test_batch_size: 128
+      stages:
+        warm_up:
+          epochs: 60
+          lr: 0.0005
+          weight_decay: 0.005
+          co_mu: 0.002
+        mixup:
+          epochs: 60
+          lr: 0.00005
+          weight_decay: 0.001
+          alpha: 6.0
+          co_entropy: 0.004
+          co_mix_entropy: 0.04
+          co_mixup: 5.0
+    alzheimermri:
+      source_dataset: "alzheimer"
+      source_num_labeled: 1000
+      batch_size: 256
+      test_batch_size: 128
+      stages:
+        warm_up:
+          epochs: 60
+          lr: 0.0005
+          weight_decay: 0.005
+          co_mu: 0.002
+        mixup:
+          epochs: 60
+          lr: 0.00005
+          weight_decay: 0.001
+          alpha: 6.0
+          co_entropy: 0.004
+          co_mix_entropy: 0.04
+          co_mixup: 5.0
+  use_recommended_hparams_by_dataset: true
+  recommended_hparams_by_dataset:
+    mnist:
+      recommended_preset: "mnist_fashionmnist_source_schedule"
+      recommended_basis: "source FashionMNIST two-stage schedule recorded as a MNIST grayscale-image recommended candidate"
+      batch_size: 256
+      test_batch_size: 128
+      stages:
+        warm_up:
+          epochs: 60
+          lr: 0.0005
+          weight_decay: 0.005
+          co_mu: 0.002
+        mixup:
+          epochs: 60
+          lr: 0.00005
+          weight_decay: 0.001
+          alpha: 6.0
+          co_entropy: 0.004
+          co_mix_entropy: 0.04
+          co_mixup: 5.0
+    imdb:
+      recommended_preset: "vector_source_schedule"
+      recommended_basis: "source Dist-PU two-stage schedule used with the benchmark vector extension as an IMDB SBERT recommended candidate"
+      batch_size: 256
+      test_batch_size: 128
+      stages:
+        warm_up:
+          epochs: 60
+          lr: 0.0005
+          weight_decay: 0.005
+          co_mu: 0.002
+        mixup:
+          epochs: 60
+          lr: 0.00005
+          weight_decay: 0.001
+          alpha: 6.0
+          co_entropy: 0.004
+          co_mix_entropy: 0.04
+          co_mixup: 5.0
+    20news:
+      recommended_preset: "vector_source_schedule"
+      recommended_basis: "Bench recommended 20News SBERT candidate; the source does not provide a 20News recipe, so this reuses the Dist-PU source two-stage schedule through the benchmark vector extension"
+      batch_size: 256
+      test_batch_size: 128
+      stages:
+        warm_up:
+          epochs: 60
+          lr: 0.0005
+          weight_decay: 0.005
+          co_mu: 0.002
+        mixup:
+          epochs: 60
+          lr: 0.00005
+          weight_decay: 0.001
+          alpha: 6.0
+          co_entropy: 0.004
+          co_mix_entropy: 0.04
+          co_mixup: 5.0
+    spambase:
+      recommended_preset: "vector_source_schedule"
+      recommended_basis: "source Dist-PU two-stage schedule used with the benchmark tabular extension as a Spambase recommended candidate"
+      batch_size: 256
+      test_batch_size: 128
+      stages:
+        warm_up:
+          epochs: 60
+          lr: 0.0005
+          weight_decay: 0.005
+          co_mu: 0.002
+        mixup:
+          epochs: 60
+          lr: 0.00005
+          weight_decay: 0.001
+          alpha: 6.0
+          co_entropy: 0.004
+          co_mix_entropy: 0.04
+          co_mixup: 5.0
+    connect4:
+      recommended_preset: "vector_source_schedule"
+      recommended_basis: "source Dist-PU two-stage schedule used with the benchmark tabular extension as a Connect4 recommended candidate"
+      batch_size: 256
+      test_batch_size: 128
+      stages:
+        warm_up:
+          epochs: 60
+          lr: 0.0005
+          weight_decay: 0.005
+          co_mu: 0.002
+        mixup:
+          epochs: 60
+          lr: 0.00005
+          weight_decay: 0.001
+          alpha: 6.0
+          co_entropy: 0.004
+          co_mix_entropy: 0.04
+          co_mixup: 5.0
   checkpoint:
     enabled: true
     save_model: false

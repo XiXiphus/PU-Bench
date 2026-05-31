@@ -17,16 +17,19 @@ nnpu:
         - "risk prior is the positive fraction inside U"
         - "non-negative PU risk with beta=0 and gamma=1 by default"
         - "source default sigmoid surrogate loss"
+        - "source exp-mnist and exp-cifar optimizer presets when the PU-Bench dataset matches"
         - "Adam optimizer family"
         - "no prior-bias initialization"
       benchmark_adaptations:
         - "PU-Bench public backbone and controlled dataset splits"
-        - "PU-Bench learning rate, weight decay, batch size, and epoch budget"
+        - "PU-Bench fallback learning rate, weight decay, batch size, and epoch budget for source-unsupported datasets"
+        - "PU-Bench recommended dataset recipes are recorded separately from source recipes when source hyperparameters are unavailable"
         - "PU-Bench checkpointing, proxy metrics, and result schema"
         - "validation monitor val_proxy_acc instead of source train/test zero-one error reporting"
   # Source-faithful switches follow kiryor/nnPUlearning:
   # Adam optimizer, sigmoid surrogate, beta=0, gamma=1, and no prior-bias init.
-  # LR, weight decay, and epoch count remain PU-Bench benchmark hyperparameters.
+  # Source exp-mnist/exp-cifar presets are applied at plan time when the
+  # benchmark dataset matches; other datasets keep these fallback values.
   optimizer: "adam"
   lr: 0.0003
   weight_decay: 0.0001
@@ -36,6 +39,68 @@ nnpu:
   loss: "sigmoid"
   gamma: 1.0
   beta: 0.0
+  use_source_hparams_by_dataset: true
+  source_hparams_by_dataset:
+    mnist:
+      lr: 0.001
+      weight_decay: 0.005
+      batch_size: 30000
+      num_epochs: 100
+      source_preset: "exp-mnist"
+      source_labeled: 1000
+      source_unlabeled: 60000
+    cifar10:
+      lr: 0.00001
+      weight_decay: 0.005
+      batch_size: 500
+      num_epochs: 100
+      source_preset: "exp-cifar"
+      source_labeled: 1000
+      source_unlabeled: 50000
+  use_recommended_hparams_by_dataset: true
+  recommended_hparams_by_dataset:
+    fashionmnist:
+      recommended_preset: "fashionmnist_mnist_style"
+      recommended_basis: "source exp-mnist lr/weight_decay/epoch budget with capped batch_size for public backbone memory"
+      lr: 0.001
+      weight_decay: 0.005
+      batch_size: 500
+      num_epochs: 100
+    alzheimermri:
+      recommended_preset: "image_default_baseline"
+      recommended_basis: "PU-Bench nnPU fallback optimizer recipe recorded as an AlzheimerMRI recommended candidate"
+      lr: 0.0003
+      weight_decay: 0.0001
+      batch_size: 256
+      num_epochs: 40
+    imdb:
+      recommended_preset: "text_embedding_default_baseline"
+      recommended_basis: "PU-Bench nnPU fallback optimizer recipe recorded as an IMDB SBERT recommended candidate"
+      lr: 0.0003
+      weight_decay: 0.0001
+      batch_size: 256
+      num_epochs: 40
+    20news:
+      recommended_preset: "text_embedding_default_baseline"
+      recommended_basis: "Bench recommended 20News SBERT candidate; the source does not provide a 20News recipe, so this uses the PU-Bench nnPU fallback optimizer recipe"
+      lr: 0.0003
+      weight_decay: 0.0001
+      batch_size: 256
+      num_epochs: 40
+    spambase:
+      recommended_preset: "tabular_default_baseline"
+      recommended_basis: "PU-Bench nnPU fallback optimizer recipe recorded as a Spambase recommended candidate"
+      lr: 0.0003
+      weight_decay: 0.0001
+      batch_size: 256
+      num_epochs: 40
+    connect4:
+      recommended_preset: "tabular_default_baseline"
+      recommended_basis: "PU-Bench nnPU fallback optimizer recipe recorded as a Connect4 recommended candidate"
+      lr: 0.0003
+      weight_decay: 0.0001
+      batch_size: 256
+      num_epochs: 40
   init_bias_from_prior: false
   label_scheme:
     true_positive_label: 1

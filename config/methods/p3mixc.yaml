@@ -2,8 +2,32 @@ p3mixc:
   metadata:
     method_key: "p3mixc"
     trainer_key: "p3mixc"
-  # Controlled PU-Bench adaptation of the source P3Mix-C loop:
-  # author source file(s): p3mix_supplement/P3MIX/hmix_train_c.py.
+    alignment:
+      level: "source_faithful_kernel_benchmark_wrapper"
+      source_reproduction: false
+      claim_note: >-
+        PU-Bench keeps the P3Mix-C h-mix training kernel and source CIFAR10
+        preset, but runs it through controlled benchmark splits, proxy
+        checkpointing, and result schemas.
+      source_references:
+        - "methods_source/repos/p3mix_supplement/P3MIX/hmix_args_c.py"
+        - "methods_source/repos/p3mix_supplement/P3MIX/hmix_train_c.py"
+        - "methods_source/repos/p3mix_supplement/P3MIX/hmix_model.py"
+      retained_source_components:
+        - "P/U loaders with source full-U case-control semantics"
+        - "P3Mix-C pseudo-label correction for confident unlabeled examples"
+        - "heuristic mixup using high-entropy labeled positives"
+        - "independently initialized EMA teacher, source EMA update schedule, and Adam betas (0.5, 0.99)"
+        - "source MixCNNCIFAR and MixLeNet architectures"
+        - "source CIFAR10-1 optimizer, scheduler, threshold, and mix-layer preset"
+      benchmark_adaptations:
+        - "PU-Bench controlled splits and validation/test result schema"
+        - "checkpoint monitor val_proxy_acc instead of source test-only logging"
+        - "method-local CIFAR input scaling preserves source hmix normalization without changing shared dataset loaders"
+      known_gaps:
+        - "FashionMNIST source presets use class splits that do not match the current Bench FashionMNIST task, so they remain partial notes"
+  # Controlled PU-Bench fallback plus source-hparam recipe(s) where the source
+  # preset matches the current Bench dataset task.
   optimizer: "adam"
   lr: 0.001
   weight_decay: 0.000001
@@ -27,6 +51,52 @@ p3mixc:
   entropy_weight: 0.05
   elr_weight: 0.0
   init_bias_from_prior: false
+  source_input_normalization: "none"
+  source_loader_drop_last: false
+  use_source_hparams_by_dataset: true
+  source_hparams_by_dataset:
+    cifar10:
+      source_preset: "cifar10-1"
+      source_dataset: "cifar10"
+      source_positive_label_list: [0, 1, 8, 9]
+      source_negative_label_list: [2, 3, 4, 5, 6, 7]
+      source_num_labeled: 1000
+      source_unlabeled: 50000
+      source_prior: 0.4
+      optimizer: "adam"
+      lr: 0.00005
+      weight_decay: 0.000001
+      batch_size: 512
+      eval_batch_size: 1024
+      num_epochs: 200
+      val_iterations: 20
+      mean_teacher: true
+      ema_decay: 0.997
+      ema_start: 0
+      ema_update: false
+      ema_end: 100
+      start_hmix: 10
+      h_positive: 100
+      p_upper: 0.8
+      p_lower: 0.2
+      alpha: 1.0
+      mix_layer: 3
+      positive_weight: 1.0
+      unlabeled_weight: 1.0
+      entropy_weight: 0.1
+      elr_weight: 0.0
+      milestones: [20, 40, 60, 80, 100]
+      scheduler_gamma: 0.5
+      source_input_normalization: "cifar10_hmix"
+      source_loader_drop_last: true
+      checkpoint:
+        early_stopping:
+          enabled: false
+  source_partial_hparams_by_dataset:
+    fashionmnist:
+      source_presets: ["fashionmnist-lenet-1", "fashionmnist-lenet-2"]
+      status: "not_promoted"
+      reason: "Bench FashionMNIST positive_classes [0,2,3,4,6] does not match either source preset split."
   milestones: [20, 40, 60, 80, 100]
   scheduler_gamma: 0.5
   label_scheme:

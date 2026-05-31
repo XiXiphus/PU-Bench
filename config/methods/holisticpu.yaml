@@ -18,12 +18,13 @@ holisticpu:
         - "Jenks partitioning with the source three_sigma filter"
         - "phase-2 loss_ft soft-label/consistency objective"
         - "source-style weak/strong image augmentation recipe"
-        - "source run.sh learning rates for source-supported image datasets"
+        - "source run.sh dataset recipes for source-supported image datasets"
       benchmark_adaptations:
         - "PU-Bench public backbone by default for main-table comparison"
         - "PU-Bench loaders, checkpoints, proxy metrics, and dataset splits"
-        - "dataset-class learning-rate resolver; MNIST reuses the source FashionMNIST LeNet rate"
+        - "source run.sh dataset recipes are applied at plan time for Bench-supported source datasets"
         - "benchmark-specific weak/strong augmentation for vector and tabular datasets"
+        - "PU-Bench recommended dataset recipes are recorded separately from source recipes when source run.sh hyperparameters are unavailable"
       modality_alignment:
         image: "source_aligned_recipe_with_controlled_backbone"
         vector_tabular: "benchmark_specific_extension"
@@ -38,12 +39,102 @@ holisticpu:
   optimizer: "sgd"
   # Fallback only. Source-supported image datasets are resolved from run.sh below.
   lr: 0.01
-  use_source_lr_by_dataset: true
-  source_lr_by_dataset:
-    cifar10: 0.0015
-    fashionmnist: 0.002
-    mnist: 0.002  # PU-Bench extension; source FashionMNIST LeNet rate.
-    alzheimermri: 0.0005
+  use_source_hparams_by_dataset: true
+  source_hparams_by_dataset:
+    cifar10:
+      source_dataset: "cifar10_1"
+      source_num_labeled: 1000
+      source_arch: "CNN_CIFAR"
+      lr: 0.0015
+      batch_size: 64
+      eval_step: 512
+      phase1_epochs: 15
+      phase2_epochs: 25
+      total_steps: 12800
+      warmup_steps: 0
+      rho: 0.1
+    fashionmnist:
+      source_dataset: "fmnist"
+      source_num_labeled: 1000
+      source_arch: "LeNet"
+      source_label_split_exact_match: false
+      lr: 0.002
+      batch_size: 64
+      eval_step: 512
+      phase1_epochs: 15
+      phase2_epochs: 25
+      total_steps: 12800
+      warmup_steps: 0
+      rho: 0.1
+    alzheimermri:
+      source_dataset: "alzheimer"
+      source_num_labeled: 769
+      source_arch: "ResNet50"
+      lr: 0.0005
+      batch_size: 16
+      eval_step: 100
+      phase1_epochs: 10
+      phase2_epochs: 20
+      total_steps: 2000
+      warmup_steps: 0
+      rho: 0.1
+  use_recommended_hparams_by_dataset: true
+  recommended_hparams_by_dataset:
+    mnist:
+      recommended_preset: "mnist_fashionmnist_style"
+      recommended_basis: "source FashionMNIST run.sh recipe used as a MNIST grayscale-image recommended candidate"
+      lr: 0.002
+      batch_size: 64
+      eval_step: 512
+      phase1_epochs: 15
+      phase2_epochs: 25
+      total_steps: 12800
+      warmup_steps: 0
+      rho: 0.1
+    imdb:
+      recommended_preset: "vector_default_short_eval"
+      recommended_basis: "HolisticPU benchmark vector extension with source optimizer defaults and reduced eval_step recorded as an IMDB SBERT recommended candidate"
+      lr: 0.01
+      batch_size: 64
+      eval_step: 128
+      phase1_epochs: 15
+      phase2_epochs: 25
+      total_steps: 5120
+      warmup_steps: 0
+      rho: 0.1
+    20news:
+      recommended_preset: "vector_default_short_eval"
+      recommended_basis: "Bench recommended 20News SBERT candidate; the source does not provide a 20News recipe, so this uses the HolisticPU benchmark vector extension with source optimizer defaults and reduced eval_step"
+      lr: 0.01
+      batch_size: 64
+      eval_step: 128
+      phase1_epochs: 15
+      phase2_epochs: 25
+      total_steps: 5120
+      warmup_steps: 0
+      rho: 0.1
+    spambase:
+      recommended_preset: "vector_default_short_eval"
+      recommended_basis: "HolisticPU benchmark vector/tabular extension with source optimizer defaults and reduced eval_step recorded as a Spambase recommended candidate"
+      lr: 0.01
+      batch_size: 64
+      eval_step: 128
+      phase1_epochs: 15
+      phase2_epochs: 25
+      total_steps: 5120
+      warmup_steps: 0
+      rho: 0.1
+    connect4:
+      recommended_preset: "vector_default_short_eval"
+      recommended_basis: "HolisticPU benchmark vector/tabular extension with source optimizer defaults and reduced eval_step recorded as a Connect4 recommended candidate"
+      lr: 0.01
+      batch_size: 64
+      eval_step: 128
+      phase1_epochs: 15
+      phase2_epochs: 25
+      total_steps: 5120
+      warmup_steps: 0
+      rho: 0.1
   weight_decay: 0.0005
   momentum: 0.9
   nesterov: true

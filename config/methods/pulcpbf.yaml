@@ -7,8 +7,9 @@ pulcpbf:
       source_reproduction: false
       claim_note: >-
         Not an author training-script reproduction: the image workflow keeps
-        PUL-CPBF's two-stage warmup, source-style P/U loaders, alpha-range
-        pseudo-label, and weak/strong consistency recipe, while PU-Bench runs
+        PUL-CPBF's two-stage warmup, source-style P/U loaders, single-checkpoint
+        alpha-range pseudo-label sampling, and weak/strong consistency losses,
+        while PU-Bench runs
         controlled dataset splits, shared public backbones, benchmark
         checkpoints/proxy metrics, and a benchmark-specific vector/tabular
         weak/strong extension.
@@ -16,26 +17,33 @@ pulcpbf:
         - "author-provided PUL-CPBF source archive used for PU-Bench alignment"
       retained_source_components:
         - "phase-1 warmup PU surrogate with asymmetric beta weighting"
-        - "alpha_range pseudo-label generation by default; trend remains available for the source creditcard-style path"
+        - "single-checkpoint alpha_range pseudo-label interval sampling by default; trend remains available for the source creditcard-style path"
         - "phase-2 mixed target from current model pseudo-labels and phase-1 pseudo-labels"
         - "source-style phase-2 model reinitialization after pseudo-label generation"
         - "optional source LeNet backbone on MNIST/FashionMNIST for explicit reproduction diagnostics"
-        - "weak/strong image augmentation recipe"
+        - "weak/strong image augmentation operators adapted from the source snapshot"
         - "unlabeled phase-2 targets do not use oracle true labels"
       benchmark_adaptations:
         - "PU-Bench controlled dataset splits"
         - "shared PU-Bench public backbones by default for fair cross-method comparison"
         - "PU-Bench loaders, checkpoints, proxy metrics, and result schema"
+        - "phase-2 batching is a PU-Bench adapter and does not reproduce the source interleaved forward path"
         - "benchmark-specific weak/strong augmentation for vector and tabular datasets"
+      known_alignment_gaps:
+        - "the provided run.sh only contains fmnist_1 commands, and source main.py hard-codes a PseudoAlzheimer phase-2 wrapper"
+        - "source warmup.py leaves val_dataset unset for FashionMNIST/CIFAR/STL branches while later constructing a validation DataLoader"
+        - "source alpha sweep checkpoints are written into alpha-suffixed directories, but source train.py reloads only one warmup_model path during alpha_list pseudo-labeling"
+        - "cifar10 and alzheimer source parser/loader branches are not counted as complete source hyperparameter recipes"
+        - "phase-1 StepLR and warmup weight_decay from the source snapshot are not enabled by this default controlled recipe"
       modality_alignment:
-        image: "source_aligned_recipe_with_controlled_backbone"
+        image: "partial_source_kernel_with_controlled_backbone"
         vector_tabular: "benchmark_specific_extension"
   # Dataset comes from the dataset config. The benchmark default uses PU-Bench
   # public backbones for fair cross-method comparison. Use private or
   # source_available only for explicit source-reproduction diagnostics.
   backbone_policy: "controlled" # controlled | private | source_available
   private_backbone_arch: "auto"
-  # Source-aligned image workflow under PU-Bench controlled splits;
+  # Partial source-kernel image workflow under PU-Bench controlled splits;
   # vector/tabular datasets use a benchmark-specific weak/strong extension.
 
   # Optimization

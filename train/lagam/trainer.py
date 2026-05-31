@@ -2,6 +2,7 @@ from __future__ import annotations
 import torch
 import torch.nn.functional as F
 import numpy as np
+import math
 from torch.utils.data import DataLoader
 from sklearn.cluster import KMeans
 from sklearn.model_selection import train_test_split
@@ -142,7 +143,6 @@ class LaGAMTrainer(BaseTrainer):
                 image_size = 32
                 mean = getattr(self.train_loader.dataset, "mean", (0.5, 0.5, 0.5))
                 std = getattr(self.train_loader.dataset, "std", (0.5, 0.5, 0.5))
-
             wrapped_dataset = LaGAMDatasetWrapper(
                 self.train_loader.dataset,
                 image_size=image_size,
@@ -374,10 +374,34 @@ class LaGAMTrainer(BaseTrainer):
         self.finalize()
 
     def train_one_epoch(self, epoch_idx: int):
+        self._adjust_source_learning_rate()
         if self.current_stage == "warmup":
             self._train_epoch_warmup()
         else:
             self._train_epoch_meta(epoch_idx)
+
+    def _adjust_source_learning_rate(self) -> None:
+        """Match LaGAM source milestone/cosine learning-rate updates."""
+        if not bool(self.params.get("use_source_lr_schedule", False)):
+            return
+        lr = float(self.params.get("lr", 1e-3))
+        epoch0 = max(0, int(self.global_epoch) - 1)
+        if bool(self.params.get("cosine", False)):
+            rate = float(self.params.get("lr_decay_rate", 0.1))
+            eta_min = lr * (rate**3)
+            total_epochs = max(1, int(self.params.get("num_epochs", 400)))
+            lr = eta_min + (lr - eta_min) * (
+                1.0 + math.cos(math.pi * epoch0 / total_epochs)
+            ) / 2.0
+        else:
+            milestones = self.params.get("lr_decay_epochs", [250, 300, 350])
+            if isinstance(milestones, str):
+                milestones = [int(item) for item in milestones.split(",") if item]
+            steps = sum(epoch0 > int(milestone) for milestone in milestones)
+            if steps > 0:
+                lr = lr * (float(self.params.get("lr_decay_rate", 0.1)) ** steps)
+        for group in self.optimizer.param_groups:
+            group["lr"] = lr
 
     def _train_epoch_warmup(self):
         self.model.train()
@@ -400,6 +424,8 @@ class LaGAMTrainer(BaseTrainer):
                     batch[3].to(self.device),
                 )
             t, y_true = t.to(self.device), y_true.to(self.device)
+            if t.sum() == 0:
+                continue
 
             # LaGAM trains on method-private targets: initial U=0, P=1, later U soft-corrected.
             labels_ = t.float().view(-1, 1)
@@ -529,6 +555,8 @@ class LaGAMTrainer(BaseTrainer):
                 true_labels.to(self.device),
                 index.to(self.device),
             )
+            if pu_labels.sum() == 0:
+                continue
 
             bs = len(pu_labels)
             labels_ = pu_labels.float().view(-1, 1)
@@ -634,7 +662,7 @@ class LaGAMTrainer(BaseTrainer):
                 feat_cont_s,
                 cluster_idxes,
                 preds_final,
-                start_knn_aug=self.global_epoch > 50,
+                start_knn_aug=(self.global_epoch - 1) > 50,
             )
 
             # Mixup on weak branch (same as warm-up)

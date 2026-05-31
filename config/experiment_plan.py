@@ -20,6 +20,17 @@ from .method_loader import DEFAULT_METHODS_DIR, list_available_methods, load_met
 from .schema_adapter import normalize_dataset_config
 
 
+SOURCE_HPARAMS_ENABLED_KEY = "use_source_hparams_by_dataset"
+SOURCE_HPARAMS_BY_DATASET_KEY = "source_hparams_by_dataset"
+# Partial source constants are documentation/bookkeeping only; they are not
+# merged into run parameters as complete source recipes.
+SOURCE_PARTIAL_HPARAMS_BY_DATASET_KEY = "source_partial_hparams_by_dataset"
+SOURCE_HPARAMS_RESOLVED_KEY = "source_hparams_resolved_from"
+RECOMMENDED_HPARAMS_ENABLED_KEY = "use_recommended_hparams_by_dataset"
+RECOMMENDED_HPARAMS_BY_DATASET_KEY = "recommended_hparams_by_dataset"
+RECOMMENDED_HPARAMS_RESOLVED_KEY = "recommended_hparams_resolved_from"
+
+
 @dataclass(frozen=True, slots=True)
 class RunSpec:
     """One fully expanded dataset/method run."""
@@ -140,6 +151,84 @@ def build_experiment_name(
     return f"{dataset_name}_{scenario}_{strategy}_c{c:g}_seed{seed}"
 
 
+def _normalize_lookup_key(value: Any) -> str:
+    return "".join(ch for ch in str(value).lower() if ch.isalnum())
+
+
+def _deep_update(base: Dict[str, Any], overrides: Mapping[str, Any]) -> Dict[str, Any]:
+    for key, value in overrides.items():
+        if isinstance(value, Mapping) and isinstance(base.get(key), dict):
+            _deep_update(base[key], value)
+        else:
+            base[key] = copy.deepcopy(value)
+    return base
+
+
+def _find_dataset_recipe(
+    recipes: Any,
+    data_run: Mapping[str, Any],
+) -> tuple[str, Mapping[str, Any]] | None:
+    if not isinstance(recipes, Mapping):
+        return None
+
+    dataset_key = _normalize_lookup_key(data_run.get("dataset_class", ""))
+    if not dataset_key:
+        return None
+
+    recipe_by_key = {
+        _normalize_lookup_key(key): (str(key), value)
+        for key, value in recipes.items()
+        if isinstance(value, Mapping)
+    }
+    return recipe_by_key.get(dataset_key)
+
+
+def resolve_method_params_for_dataset(
+    method_params: Mapping[str, Any],
+    data_run: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Apply dataset-specific method recipes to one method/run pair.
+
+    Method YAMLs still carry one benchmark fallback recipe, but source papers often
+    provide dataset-specific optimizer constants.  This resolver applies source
+    recipes first; for source-unsupported Bench datasets it may then apply a
+    separate recommended Bench recipe.  The actual trainer receives one flat params
+    dictionary and does not need method-private config plumbing.
+    """
+
+    resolved = copy.deepcopy(dict(method_params))
+    resolved.pop(SOURCE_HPARAMS_RESOLVED_KEY, None)
+    resolved.pop(RECOMMENDED_HPARAMS_RESOLVED_KEY, None)
+
+    if not bool(resolved.get(SOURCE_HPARAMS_ENABLED_KEY, False)):
+        source_matched = None
+    else:
+        source_matched = _find_dataset_recipe(
+            resolved.get(SOURCE_HPARAMS_BY_DATASET_KEY),
+            data_run,
+        )
+    if source_matched is not None:
+        source_key, source_recipe = source_matched
+        _deep_update(resolved, source_recipe)
+        resolved[SOURCE_HPARAMS_RESOLVED_KEY] = (
+            f"{SOURCE_HPARAMS_BY_DATASET_KEY}.{source_key}"
+        )
+        return resolved
+
+    if bool(resolved.get(RECOMMENDED_HPARAMS_ENABLED_KEY, False)):
+        recommended_matched = _find_dataset_recipe(
+            resolved.get(RECOMMENDED_HPARAMS_BY_DATASET_KEY),
+            data_run,
+        )
+        if recommended_matched is not None:
+            recommended_key, recommended_recipe = recommended_matched
+            _deep_update(resolved, recommended_recipe)
+            resolved[RECOMMENDED_HPARAMS_RESOLVED_KEY] = (
+                f"{RECOMMENDED_HPARAMS_BY_DATASET_KEY}.{recommended_key}"
+            )
+    return resolved
+
+
 def validate_requested_methods(
     methods: Sequence[str] | None,
     available_methods: Iterable[str] | None = None,
@@ -210,7 +299,10 @@ def build_plan(
     for data_run in data_runs:
         for method_name in method_names:
             method_config = method_config_map[method_name]
-            method_params = method_config.params
+            method_params = resolve_method_params_for_dataset(
+                method_config.params,
+                data_run,
+            )
             method_metadata = copy.deepcopy(method_config.metadata)
             merged_params = copy.deepcopy(method_params)
             merged_params.update(data_run)
@@ -303,6 +395,7 @@ __all__ = [
     "load_dataset_config",
     "plan_to_dict",
     "plans_to_dict",
+    "resolve_method_params_for_dataset",
     "run_spec_to_dict",
     "validate_requested_methods",
 ]

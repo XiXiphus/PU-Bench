@@ -359,15 +359,17 @@ class PULCPBFTrainer(BaseTrainer):
         self._init_optimizer_phase2()
         self.current_phase = 2
 
-        # Reset early stopping counter before entering final stage
+        # Phase 2 reinitializes the model, so phase-1 checkpoint scores cannot
+        # remain eligible as the run-level best metrics.
         if self.checkpoint_handler:
             self.console.log(
-                "Resetting early stopping counter for fine-tuning stage.", style="blue"
+                "Resetting checkpoint tracking for fine-tuning stage.", style="blue"
             )
             if self.file_console:
                 self.file_console.log(
-                    "Resetting early stopping counter for fine-tuning stage."
+                    "Resetting checkpoint tracking for fine-tuning stage."
                 )
+            self.reset_checkpoint_tracking()
         # Re-enable early stopping for Phase-2
         self.set_checkpoint_early_stopping(True, reset=True)
 

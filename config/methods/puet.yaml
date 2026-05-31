@@ -2,10 +2,30 @@ puet:
   metadata:
     method_key: "puet"
     trainer_key: "puet"
+    alignment:
+      level: "source_extra_trees_benchmark_wrapper"
+      source_reproduction: false
+      source_references:
+        - "methods_source/repos/puet/README.md"
+        - "methods_source/repos/puet/run_puet_simple.py"
+        - "methods_source/repos/puet/run_puet.py"
+        - "methods_source/repos/puet/trees.py"
+        - "methods_source/repos/puet/tree.py"
+      retained_source_components:
+        - "PUExtraTrees recursive PU-risk tree construction"
+        - "nnPU quadratic-loss split impurity and regional prediction rule"
+        - "source minimal MNIST even-vs-odd recipe from run_puet_simple.py"
+      benchmark_adaptations:
+        - "PU-Bench loaders provide controlled case-control P/U splits and pi_U"
+        - "checkpoint selection uses val_proxy_acc; oracle/test labels remain diagnostics only"
+        - "probability scores are added from source leaf posterior vstar only for PU-Bench AUC reporting"
+      known_alignment_gaps:
+        - "source run_puet_simple.py samples n_p=1000 labeled positives, while PU-Bench controls labeled positives through dataset c values such as c=0.1"
+        - "source run_puet.py is digit-0-vs-rest MNIST and is not used for Bench even-vs-odd MNIST source matching"
   # Source: jonathanwilton/PUExtraTrees@5cb15d7e021a6e24d4cd300278500c38729e2775.
   # CPU-only Extra Trees estimator; PU-Bench adds validation/proxy metrics and
   # probability-score reporting for AUC, but does not use a shared backbone.
-  # Model hyperparameters
+  # Fallback model hyperparameters. Source-supported MNIST is resolved below.
   n_estimators: 30
   risk_estimator: "nnPU" # 'nnPU', 'uPU', or 'PN'
   loss: "quadratic" # 'quadratic' or 'logistic'
@@ -14,6 +34,23 @@ puet:
   max_features: "sqrt"
   max_candidates: 1
   n_jobs: 4 # Source run_puet.py example uses n_jobs=4
+  use_source_hparams_by_dataset: true
+  source_hparams_by_dataset:
+    mnist:
+      source_dataset: "OpenML mnist_784_even_vs_odd"
+      source_script: "run_puet_simple.py"
+      source_recipe_scope: "minimal_working_example_method_hyperparameters"
+      source_label_split_exact_match: true
+      source_protocol_labeled_positives: 1000
+      bench_protocol_note: "PU-Bench keeps dataset-controlled c values instead of source fixed n_p=1000."
+      n_estimators: 100
+      risk_estimator: "nnPU"
+      loss: "quadratic"
+      max_depth: null
+      min_samples_leaf: 1
+      max_features: "sqrt"
+      max_candidates: 1
+      n_jobs: 1
 
   # Benchmark settings
   seed: 42

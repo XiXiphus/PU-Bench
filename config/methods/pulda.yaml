@@ -18,6 +18,7 @@ pulda:
         - "EMA estimates for unlabeled expectation and negative-class margin terms"
         - "fixed P/U resampling batches with P_batch_size=16 and U_batch_size=128"
         - "mixup stage initialized from source-style pseudo scores"
+        - "source train.py CIFAR-10-only optimizer and schedule recipe"
         - "source coefficients co_mixup=4.2, alpha=11.0, tmpr=3.5, alpha_U=0.85, and alpha_CN=0.5"
         - "source train/test batch sizes and eight-worker loader default"
         - "no prior-bias initialization"
@@ -27,6 +28,7 @@ pulda:
         - "PU-Bench checkpointing, proxy metrics, and result schema"
         - "validation monitor val_proxy_acc instead of source-script test accuracy logging"
         - "benchmark dataset object contract instead of author CIFAR-only dataset factory"
+        - "PU-Bench recommended dataset recipes are recorded separately from the source CIFAR-10 recipe"
       modality_alignment:
         image: "source_aligned_recipe_with_controlled_backbone"
         vector_tabular: "benchmark_specific_extension"
@@ -42,6 +44,193 @@ pulda:
   pin_memory: true
   num_epochs: 120 # Total epochs (warm-up + alignment), original ~60+60
   seed: 42
+  use_source_hparams_by_dataset: true
+  source_hparams_by_dataset:
+    cifar10:
+      source_dataset: "cifar-10"
+      source_num_labeled: 1000
+      batch_size: 256
+      test_batch_size: 128
+      warm_up_lr: 0.0001
+      lr: 0.001
+      warm_up_weight_decay: 0.0005
+      weight_decay: 0.0001
+      warm_up_epochs: 60
+      pu_epochs: 60
+      tmpr: 3.5
+      two_way: 1
+      margin: 0.6
+      EMA: 1
+      alpha_U: 0.85
+      alpha_CN: 0.5
+      co_mixup: 4.2
+      alpha: 11.0
+      resample: 1
+      P_batch_size: 16
+      U_batch_size: 128
+  use_recommended_hparams_by_dataset: true
+  recommended_hparams_by_dataset:
+    mnist:
+      recommended_preset: "image_cifar10_schedule_bce_warmup"
+      recommended_basis: "source PULDA CIFAR-10 optimizer and alignment schedule with benchmark BCE warm-up for a MNIST grayscale-image recommended candidate"
+      batch_size: 256
+      test_batch_size: 128
+      warmup_loss: "bce"
+      warm_up_lr: 0.0001
+      lr: 0.001
+      warm_up_weight_decay: 0.0005
+      weight_decay: 0.0001
+      warm_up_epochs: 60
+      pu_epochs: 60
+      tmpr: 3.5
+      two_way: 1
+      margin: 0.6
+      EMA: 1
+      alpha_U: 0.85
+      alpha_CN: 0.5
+      co_mixup: 4.2
+      alpha: 11.0
+      resample: 1
+      P_batch_size: 16
+      U_batch_size: 128
+    fashionmnist:
+      recommended_preset: "image_cifar10_schedule_bce_warmup"
+      recommended_basis: "source PULDA CIFAR-10 optimizer and alignment schedule with benchmark BCE warm-up for a FashionMNIST grayscale-image recommended candidate"
+      batch_size: 256
+      test_batch_size: 128
+      warmup_loss: "bce"
+      warm_up_lr: 0.0001
+      lr: 0.001
+      warm_up_weight_decay: 0.0005
+      weight_decay: 0.0001
+      warm_up_epochs: 60
+      pu_epochs: 60
+      tmpr: 3.5
+      two_way: 1
+      margin: 0.6
+      EMA: 1
+      alpha_U: 0.85
+      alpha_CN: 0.5
+      co_mixup: 4.2
+      alpha: 11.0
+      resample: 1
+      P_batch_size: 16
+      U_batch_size: 128
+    alzheimermri:
+      recommended_preset: "image_cifar10_schedule_bce_warmup"
+      recommended_basis: "source PULDA CIFAR-10 optimizer and alignment schedule with benchmark BCE warm-up for an AlzheimerMRI image recommended candidate"
+      batch_size: 256
+      test_batch_size: 128
+      warmup_loss: "bce"
+      warm_up_lr: 0.0001
+      lr: 0.001
+      warm_up_weight_decay: 0.0005
+      weight_decay: 0.0001
+      warm_up_epochs: 60
+      pu_epochs: 60
+      tmpr: 3.5
+      two_way: 1
+      margin: 0.6
+      EMA: 1
+      alpha_U: 0.85
+      alpha_CN: 0.5
+      co_mixup: 4.2
+      alpha: 11.0
+      resample: 1
+      P_batch_size: 16
+      U_batch_size: 128
+    imdb:
+      recommended_preset: "vector_cifar10_schedule_bce_warmup"
+      recommended_basis: "source PULDA CIFAR-10 optimizer and alignment schedule with benchmark BCE warm-up for an IMDB SBERT recommended candidate"
+      batch_size: 256
+      test_batch_size: 128
+      warmup_loss: "bce"
+      warm_up_lr: 0.0001
+      lr: 0.001
+      warm_up_weight_decay: 0.0005
+      weight_decay: 0.0001
+      warm_up_epochs: 60
+      pu_epochs: 60
+      tmpr: 3.5
+      two_way: 1
+      margin: 0.6
+      EMA: 1
+      alpha_U: 0.85
+      alpha_CN: 0.5
+      co_mixup: 4.2
+      alpha: 11.0
+      resample: 1
+      P_batch_size: 16
+      U_batch_size: 128
+    20news:
+      recommended_preset: "vector_cifar10_schedule_bce_warmup"
+      recommended_basis: "Bench recommended 20News SBERT candidate; the source does not provide a 20News recipe, so this reuses PULDA CIFAR-10 optimizer/alignment constants with benchmark BCE warm-up"
+      batch_size: 256
+      test_batch_size: 128
+      warmup_loss: "bce"
+      warm_up_lr: 0.0001
+      lr: 0.001
+      warm_up_weight_decay: 0.0005
+      weight_decay: 0.0001
+      warm_up_epochs: 60
+      pu_epochs: 60
+      tmpr: 3.5
+      two_way: 1
+      margin: 0.6
+      EMA: 1
+      alpha_U: 0.85
+      alpha_CN: 0.5
+      co_mixup: 4.2
+      alpha: 11.0
+      resample: 1
+      P_batch_size: 16
+      U_batch_size: 128
+    spambase:
+      recommended_preset: "vector_cifar10_schedule_bce_warmup"
+      recommended_basis: "source PULDA CIFAR-10 optimizer and alignment schedule with benchmark BCE warm-up for a Spambase recommended candidate"
+      batch_size: 256
+      test_batch_size: 128
+      warmup_loss: "bce"
+      warm_up_lr: 0.0001
+      lr: 0.001
+      warm_up_weight_decay: 0.0005
+      weight_decay: 0.0001
+      warm_up_epochs: 60
+      pu_epochs: 60
+      tmpr: 3.5
+      two_way: 1
+      margin: 0.6
+      EMA: 1
+      alpha_U: 0.85
+      alpha_CN: 0.5
+      co_mixup: 4.2
+      alpha: 11.0
+      resample: 1
+      P_batch_size: 16
+      U_batch_size: 128
+    connect4:
+      recommended_preset: "vector_cifar10_schedule_bce_warmup"
+      recommended_basis: "source PULDA CIFAR-10 optimizer and alignment schedule with benchmark BCE warm-up for a Connect4 recommended candidate"
+      batch_size: 256
+      test_batch_size: 128
+      warmup_loss: "bce"
+      warm_up_lr: 0.0001
+      lr: 0.001
+      warm_up_weight_decay: 0.0005
+      weight_decay: 0.0001
+      warm_up_epochs: 60
+      pu_epochs: 60
+      tmpr: 3.5
+      two_way: 1
+      margin: 0.6
+      EMA: 1
+      alpha_U: 0.85
+      alpha_CN: 0.5
+      co_mixup: 4.2
+      alpha: 11.0
+      resample: 1
+      P_batch_size: 16
+      U_batch_size: 128
 
   # Warm-up stage optimizer settings
   warm_up_lr: 0.0001 # Warm-up stage learning rate (original ~1e-4)

@@ -30,11 +30,14 @@ import torch.nn.functional as F
 from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.data import DataLoader, Subset
 
-from backbone.ema import ModelEMA
-
 from ..base_trainer import BaseTrainer
 from ..schedules import sigmoid_rampup
 from .model_selector import select_model
+from .source_adapter import (
+    create_p3mix_source_ema,
+    install_p3mix_source_input_adapters,
+    p3mix_loader_kwargs,
+)
 
 
 class P3MIXETrainer(BaseTrainer):
@@ -74,6 +77,7 @@ class P3MIXETrainer(BaseTrainer):
         self.elr_weight = self.params.get("elr_weight", 1.0)  # P3MIX-E uses this
 
     def _prepare_p3mix_data(self):
+        install_p3mix_source_input_adapters(self)
         full_train_dataset = self.train_loader.dataset
         positive_indices = [
             i for i, label in enumerate(full_train_dataset.pu_labels) if label == 1
@@ -84,13 +88,29 @@ class P3MIXETrainer(BaseTrainer):
         p_dataset = Subset(full_train_dataset, positive_indices)
         u_dataset = Subset(full_train_dataset, unlabeled_indices)
         batch_size = self.params.get("batch_size", 128)
+        drop_last = bool(self.params.get("source_loader_drop_last", False))
+        loader_kwargs = p3mix_loader_kwargs(self.params)
         self.p_loader = DataLoader(
-            p_dataset, batch_size=batch_size, shuffle=True, drop_last=False
+            p_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            drop_last=drop_last,
+            **loader_kwargs,
         )
         self.u_loader = DataLoader(
-            u_dataset, batch_size=batch_size, shuffle=True, drop_last=False
+            u_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            drop_last=drop_last,
+            **loader_kwargs,
         )
-        self.p_update_loader = DataLoader(p_dataset, batch_size=1000, shuffle=False)
+        self.p_update_loader = DataLoader(
+            p_dataset,
+            batch_size=1000,
+            shuffle=False,
+            drop_last=False,
+            **loader_kwargs,
+        )
 
     def _build_p3mix_model(self):
         self.model = self.create_model().to(self.device)
@@ -118,7 +138,7 @@ class P3MIXETrainer(BaseTrainer):
                     _ = self.model(bootstrap_batch.to(self.device))
 
         if self.use_ema:
-            self.ema_model = ModelEMA(self, self.model, decay=self.ema_decay)
+            self.ema_model = create_p3mix_source_ema(self.create_model, self.device)
         else:
             self.ema_model = None
         # Initialize bias from prior for fairness (single-logit head)

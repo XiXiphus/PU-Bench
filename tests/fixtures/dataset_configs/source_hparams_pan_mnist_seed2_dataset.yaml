@@ -1,0 +1,14 @@
+dataset_class: MNIST
+data_dir: ./datasets
+random_seeds: [2]
+c_values: [0.1]
+scenarios: [case-control]
+selection_strategies: ["random"]
+n_labeled: 3000
+val_ratio: 0.01
+target_prevalence: null
+with_replacement: false
+also_print_dataset_stats: false
+label_scheme:
+  positive_classes: [0, 2, 4, 6, 8]
+  negative_classes: [1, 3, 5, 7, 9]
