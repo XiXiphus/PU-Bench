@@ -16,7 +16,7 @@ import torch
 from torch import nn
 
 from ..base_trainer import BaseTrainer
-from ..checkpointing import CheckpointBundle
+from ..utils.checkpointing import CheckpointBundle
 from .models import (
     AClassifierCNN,
     CGenPUConvDiscriminatorADNI,

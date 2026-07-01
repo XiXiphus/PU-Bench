@@ -1,9 +1,13 @@
 from __future__ import annotations
-import os
+
 import json
+import os
 import time
-import numpy as np
 from datetime import datetime
+
+import numpy as np
+from rich.console import Console
+from rich.table import Table
 from sklearn.metrics import (
     accuracy_score,
     f1_score,
@@ -11,12 +15,10 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
-from rich.console import Console
-from rich.table import Table
 
-from ..checkpointing import ModelCheckpoint
-from ..data_factory import prepare_loaders
-from ..reproducibility import set_global_seed
+from ..utils.checkpointing import ModelCheckpoint
+from ..utils.data_factory import prepare_loaders
+from ..utils.reproducibility import set_global_seed
 from .trees import PUExtraTrees
 
 
@@ -82,7 +84,9 @@ class PUETTrainer:
         X_train = self._features_to_numpy(train_dataset)
         pu_labels_train = self._labels_to_numpy(train_dataset.pu_labels)
         y_train_true = self._labels_to_numpy(train_dataset.true_labels)
-        X_val = self._features_to_numpy(val_dataset) if val_dataset is not None else None
+        X_val = (
+            self._features_to_numpy(val_dataset) if val_dataset is not None else None
+        )
         pu_labels_val = (
             self._labels_to_numpy(val_dataset.pu_labels)
             if val_dataset is not None
@@ -303,9 +307,7 @@ class PUETTrainer:
             correct_p = int((y_pred_binary[p_mask] == 1).sum())
             correct_u = int((y_pred_binary[u_mask] == 0).sum())
             if scenario == "case-control":
-                pa = 2 * float(prior) * (correct_p / total_p) + (
-                    correct_u / total_u
-                )
+                pa = 2 * float(prior) * (correct_p / total_p) + (correct_u / total_u)
             else:
                 pa = 2 * float(prior) * (correct_p / total_p) + (
                     (correct_p + correct_u) / (total_p + total_u)
@@ -384,8 +386,10 @@ class PUETTrainer:
                         "total": len(train_dataset),
                         "total_positives": (
                             int(
-                                (self._labels_to_numpy(train_dataset.true_labels) == 1)
-                                .sum()
+                                (
+                                    self._labels_to_numpy(train_dataset.true_labels)
+                                    == 1
+                                ).sum()
                             )
                             if hasattr(train_dataset, "true_labels")
                             else None

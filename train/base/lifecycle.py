@@ -5,13 +5,13 @@ from __future__ import annotations
 import json
 import os
 import time
-from datetime import datetime
 from contextlib import contextmanager
+from datetime import datetime
 
 import torch
 from rich.console import Console
 
-from ..checkpointing import ModelCheckpoint
+from ..utils.checkpointing import ModelCheckpoint
 
 
 class LifecycleMixin:
@@ -177,7 +177,10 @@ class LifecycleMixin:
             return
 
         monitor = str(getattr(self.checkpoint_handler, "monitor", ""))
-        if monitor.startswith("val_") and getattr(self, "validation_loader", None) is None:
+        if (
+            monitor.startswith("val_")
+            and getattr(self, "validation_loader", None) is None
+        ):
             raise ValueError(
                 f"Checkpoint monitor '{monitor}' requires a validation loader. "
                 "Set a positive val_ratio or choose an explicit train_/test_ monitor."

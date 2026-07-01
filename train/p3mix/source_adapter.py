@@ -13,7 +13,7 @@ from typing import Any
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from ..reproducibility import seed_worker
+from ..utils.reproducibility import seed_worker
 
 
 class P3MixSourceInputDataset(Dataset):
@@ -104,7 +104,9 @@ def p3mix_loader_kwargs(params: dict[str, Any]) -> dict[str, Any]:
     return _loader_kwargs(params)
 
 
-def create_p3mix_source_ema(model_factory: Any, device: torch.device) -> SimpleNamespace:
+def create_p3mix_source_ema(
+    model_factory: Any, device: torch.device
+) -> SimpleNamespace:
     """Create the source-style EMA teacher as an independent detached model."""
 
     ema_model = model_factory().to(device)

@@ -18,7 +18,7 @@ from .base.data_model import DataModelMixin
 from .base.epoch_loop import EpochLoopMixin
 from .base.lifecycle import LifecycleMixin
 from .base.results import ResultSummaryMixin
-from .reproducibility import set_global_seed
+from .utils.reproducibility import set_global_seed
 
 
 class BaseTrainer(

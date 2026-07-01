@@ -7,7 +7,7 @@ import time
 from rich.table import Table
 from tqdm import tqdm
 
-from ..metrics import evaluate_metrics, evaluate_proxy_metrics
+from ..utils.metrics import evaluate_metrics, evaluate_proxy_metrics
 
 
 class EpochLoopMixin:

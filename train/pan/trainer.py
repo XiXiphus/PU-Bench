@@ -18,8 +18,8 @@ import torch
 from torch import nn
 
 from ..base_trainer import BaseTrainer
-from ..checkpointing import CheckpointBundle
-from ..model_factory import select_model
+from ..utils.checkpointing import CheckpointBundle
+from ..utils.model_factory import select_model
 from .core import model_probability, pan_objective
 
 
@@ -87,7 +87,10 @@ class PANTrainer(BaseTrainer):
 
             for model in (self.model, self.discriminator):
                 fc = getattr(model, "final_classifier", None)
-                if isinstance(fc, torch.nn.Linear) and getattr(fc, "bias", None) is not None:
+                if (
+                    isinstance(fc, torch.nn.Linear)
+                    and getattr(fc, "bias", None) is not None
+                ):
                     if int(getattr(fc, "out_features", 0)) == 1:
                         with torch.no_grad():
                             fc.bias.fill_(_logit(self.prior))
@@ -109,7 +112,9 @@ class PANTrainer(BaseTrainer):
         p_indices = (pu_labels == self.pan_labeled_label).nonzero(as_tuple=True)[0]
         u_indices = (pu_labels == self.pan_unlabeled_label).nonzero(as_tuple=True)[0]
         if p_indices.numel() == 0 or u_indices.numel() == 0:
-            raise ValueError("PAN requires both labeled positives and unlabeled samples.")
+            raise ValueError(
+                "PAN requires both labeled positives and unlabeled samples."
+            )
         self.pan_train_dataset = full_train_dataset
         self.pan_p_indices = p_indices.long()
         self.pan_u_indices = u_indices.long()
@@ -138,7 +143,9 @@ class PANTrainer(BaseTrainer):
         p_cursor = 0
         u_cursor = 0
 
-        batch_size = int(self.params.get("batch_size", self.train_loader.batch_size or 1))
+        batch_size = int(
+            self.params.get("batch_size", self.train_loader.batch_size or 1)
+        )
         batch_size = max(2, batch_size)
         total_count = len(self.pan_p_indices) + len(self.pan_u_indices)
         u_ratio = len(self.pan_u_indices) / max(1, total_count)

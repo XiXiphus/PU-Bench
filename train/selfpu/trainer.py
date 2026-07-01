@@ -40,18 +40,18 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 
 from ..base_trainer import BaseTrainer
-from ..metrics import evaluate_metrics, evaluate_proxy_metrics
-from ..model_factory import select_model
-from ..reproducibility import seed_worker
+from ..utils.metrics import evaluate_metrics, evaluate_proxy_metrics
+from ..utils.model_factory import select_model
+from ..utils.reproducibility import seed_worker
 from .ema import EMATeacher
 from .losses import (
     mutual_student_consistency,
-    source_nnpu_loss,
-    sigmoid_entropy_values,
     sigmoid_entropy_loss,
+    sigmoid_entropy_values,
     sigmoid_rampup,
-    softmax_mse_consistency,
     signed_binary_ce,
+    softmax_mse_consistency,
+    source_nnpu_loss,
 )
 from .selection import (
     SelectionState,
@@ -392,9 +392,12 @@ class SelfPUTrainer(BaseTrainer):
                 scheduler.optimizer.param_groups,
                 scheduler.base_lrs,
             ):
-                lr = eta_min + (float(base_lr) - eta_min) * (
-                    1.0 + math.cos(math.pi * source_epoch / t_max)
-                ) / 2.0
+                lr = (
+                    eta_min
+                    + (float(base_lr) - eta_min)
+                    * (1.0 + math.cos(math.pi * source_epoch / t_max))
+                    / 2.0
+                )
                 group["lr"] = lr
                 lrs.append(lr)
             scheduler.last_epoch = source_epoch
@@ -424,11 +427,9 @@ class SelfPUTrainer(BaseTrainer):
             if self._check_mean_teacher(epoch_idx):
                 with torch.no_grad():
                     teacher_logits = teacher.model(x).view(-1)
-                loss = (
-                    loss
-                    + self._consistency_weight(epoch_idx)
-                    * softmax_mse_consistency(logits, teacher_logits)
-                )
+                loss = loss + self._consistency_weight(
+                    epoch_idx
+                ) * softmax_mse_consistency(logits, teacher_logits)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -514,11 +515,9 @@ class SelfPUTrainer(BaseTrainer):
             if self._check_mean_teacher(epoch_idx):
                 with torch.no_grad():
                     teacher_logits = teacher.model(x).view(-1)
-                loss = (
-                    loss
-                    + self._consistency_weight(epoch_idx)
-                    * softmax_mse_consistency(logits, teacher_logits)
-                )
+                loss = loss + self._consistency_weight(
+                    epoch_idx
+                ) * softmax_mse_consistency(logits, teacher_logits)
 
             if use_self_calibration:
                 loss = loss + (
@@ -535,7 +534,9 @@ class SelfPUTrainer(BaseTrainer):
             key = "selfpu_mutual_accept_rate"
             previous = self._epoch_stats.get(key)
             value = float(mutual_accepts / mutual_batches)
-            self._epoch_stats[key] = value if previous is None else (previous + value) / 2
+            self._epoch_stats[key] = (
+                value if previous is None else (previous + value) / 2
+            )
         if calibration_batches:
             prefix = f"selfpu_calibration_branch{branch_id}"
             self._epoch_stats[f"{prefix}_w0_sum"] = float(
@@ -571,8 +572,7 @@ class SelfPUTrainer(BaseTrainer):
         )
         params = {name: param for name, param in model.named_parameters()}
         buffers = {
-            name: buffer.detach().clone()
-            for name, buffer in model.named_buffers()
+            name: buffer.detach().clone() for name, buffer in model.named_buffers()
         }
         meta_logits = functional_call(model, (params, buffers), (x,)).view(-1)
         negative_entropy = -sigmoid_entropy_values(meta_logits)
@@ -892,7 +892,7 @@ class SelfPUTrainer(BaseTrainer):
         metric_key = monitor
         for prefix in ("val_", "train_", "test_"):
             if metric_key.startswith(prefix):
-                metric_key = metric_key[len(prefix):]
+                metric_key = metric_key[len(prefix) :]
                 break
         fallback = proxy_metrics.get("proxy_acc", float("-inf"))
         return float(proxy_metrics.get(metric_key, fallback))

@@ -28,14 +28,21 @@ from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
 from backbone.ema import ModelEMA
-from ..augmentations.vector import (
+
+from ..base_trainer import BaseTrainer
+from ..utils.augmentations.vector import (
     VectorAugPUDatasetWrapper,
     VectorStrongAugment,
     VectorWeakAugment,
 )
-from ..base_trainer import BaseTrainer
-from ..metrics import _model_predict, evaluate_metrics, evaluate_proxy_metrics
-from ..reproducibility import seed_worker
+from ..utils.metrics import _model_predict, evaluate_metrics, evaluate_proxy_metrics
+from ..utils.reproducibility import seed_worker
+from .augment import (
+    HolisticPUDatasetWrapper,
+    HolisticPUEvalDatasetWrapper,
+    TransformHolisticPU,
+    TransformHolisticPUEval,
+)
 from .core import (
     as_numpy,
     cosine_schedule_with_warmup,
@@ -44,12 +51,6 @@ from .core import (
     jenks_breaks,
     soft_cross_entropy,
     source_three_sigma,
-)
-from .augment import (
-    HolisticPUDatasetWrapper,
-    HolisticPUEvalDatasetWrapper,
-    TransformHolisticPU,
-    TransformHolisticPUEval,
 )
 from .model_selector import select_model
 
@@ -76,7 +77,9 @@ class HolisticPUTrainer(BaseTrainer):
             self.params.get("eval_step", self.params.get("steps_per_epoch", 512))
         )
         self.mu = int(self.params.get("mu", 1))
-        self.rho = float(self.params.get("rho", self.params.get("label_smoothing", 0.1)))
+        self.rho = float(
+            self.params.get("rho", self.params.get("label_smoothing", 0.1))
+        )
         self.temperature = float(self.params.get("T", 1.0))
         self.threshold = float(self.params.get("threshold", 0.9))
         self.use_ema = bool(self.params.get("use_ema", True))
@@ -183,7 +186,9 @@ class HolisticPUTrainer(BaseTrainer):
             )
             self._build_model()
             self._create_source_loaders()
-            self.ema_model = ModelEMA(self, self.model, self.ema_decay) if self.use_ema else None
+            self.ema_model = (
+                ModelEMA(self, self.model, self.ema_decay) if self.use_ema else None
+            )
             self.optimizer, self.scheduler = self._make_source_optimizer_and_scheduler()
             final_metrics = self._run_phase2()
 
@@ -227,7 +232,9 @@ class HolisticPUTrainer(BaseTrainer):
         )
         scheduler = cosine_schedule_with_warmup(
             optimizer,
-            num_warmup_steps=int(self.params.get("warmup_steps", self.params.get("warmup", 0))),
+            num_warmup_steps=int(
+                self.params.get("warmup_steps", self.params.get("warmup", 0))
+            ),
             num_training_steps=total_steps,
         )
         return optimizer, scheduler
@@ -253,9 +260,16 @@ class HolisticPUTrainer(BaseTrainer):
         if batch_size <= 0:
             raise ValueError(f"Invalid HolisticPU batch size: {batch_size}")
         source_batch_size = batch_size
-        if bool(self.params.get("expand_labels", False)) or len(labeled_indices) < batch_size:
-            repeats = int(math.ceil(batch_size * self.eval_step / max(1, len(labeled_indices))))
-            labeled_indices = np.hstack([labeled_indices for _ in range(max(1, repeats))])
+        if (
+            bool(self.params.get("expand_labels", False))
+            or len(labeled_indices) < batch_size
+        ):
+            repeats = int(
+                math.ceil(batch_size * self.eval_step / max(1, len(labeled_indices)))
+            )
+            labeled_indices = np.hstack(
+                [labeled_indices for _ in range(max(1, repeats))]
+            )
             np.random.shuffle(labeled_indices)
             if self.file_console:
                 self.file_console.log(
@@ -351,9 +365,17 @@ class HolisticPUTrainer(BaseTrainer):
                 dropout_ratio=float(self.params.get("vec_strong_dropout", 0.0)),
                 sign_flip_ratio=float(self.params.get("vec_sign_flip_ratio", 0.0)),
             )
-            wrapped = VectorAugPUDatasetWrapper(base_dataset, weak_aug=weak, strong_aug=strong)
+            wrapped = VectorAugPUDatasetWrapper(
+                base_dataset, weak_aug=weak, strong_aug=strong
+            )
 
-        for attr in ("features", "pu_labels", "true_labels", "indices", "pseudo_labels"):
+        for attr in (
+            "features",
+            "pu_labels",
+            "true_labels",
+            "indices",
+            "pseudo_labels",
+        ):
             if hasattr(base_dataset, attr):
                 setattr(wrapped, attr, getattr(base_dataset, attr))
         if hasattr(base_dataset, "pu_metadata"):
@@ -398,7 +420,9 @@ class HolisticPUTrainer(BaseTrainer):
             return "cifar"
         return "generic"
 
-    def _image_normalization(self, base_dataset) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    def _image_normalization(
+        self, base_dataset
+    ) -> tuple[tuple[float, ...], tuple[float, ...]]:
         dataset_class = str(self.params.get("dataset_class", "")).lower()
         if "cifar" in dataset_class or "stl" in dataset_class:
             return (0.4914, 0.4822, 0.4465), (0.2471, 0.2435, 0.2616)
@@ -429,7 +453,9 @@ class HolisticPUTrainer(BaseTrainer):
     def _run_phase1(self) -> np.ndarray:
         assert self.labeled_loader is not None and self.unlabeled_loader is not None
         self.optimizer, self.scheduler = self._make_source_optimizer_and_scheduler()
-        self.ema_model = ModelEMA(self, self.model, self.ema_decay) if self.use_ema else None
+        self.ema_model = (
+            ModelEMA(self, self.model, self.ema_decay) if self.use_ema else None
+        )
 
         score_history: list[np.ndarray] = []
         labeled_iter = iter(self.labeled_loader)
@@ -461,7 +487,9 @@ class HolisticPUTrainer(BaseTrainer):
                 logits_u, _logits_u_s = logits[: 2 * batch_size].chunk(2)
                 logits_l_w, logits_l_s = logits[2 * batch_size :].chunk(2)
 
-                targets_l = torch.zeros(batch_size, device=self.device, dtype=torch.long)
+                targets_l = torch.zeros(
+                    batch_size, device=self.device, dtype=torch.long
+                )
                 targets_u = torch.ones(batch_size, device=self.device, dtype=torch.long)
                 loss_l = (
                     F.cross_entropy(logits_l_w, targets_l, label_smoothing=self.rho)
@@ -480,7 +508,9 @@ class HolisticPUTrainer(BaseTrainer):
 
             scores = self._record_unlabeled_positive_scores()
             score_history.append(scores)
-            self._last_phase_losses = {"phase1_loss": float(np.mean(losses)) if losses else float("nan")}
+            self._last_phase_losses = {
+                "phase1_loss": float(np.mean(losses)) if losses else float("nan")
+            }
             if self.file_console:
                 self.file_console.log(
                     f"phase1 epoch={epoch + 1}/{self.phase1_epochs} loss={self._last_phase_losses['phase1_loss']:.4f} "
@@ -523,7 +553,9 @@ class HolisticPUTrainer(BaseTrainer):
             breaks = jenks_breaks(finite_trends)
             break_point = float(breaks[1])
             if self.use_three_sigma and break_point > 0:
-                filtered = source_three_sigma(finite_trends, self.trend_filter_threshold)
+                filtered = source_three_sigma(
+                    finite_trends, self.trend_filter_threshold
+                )
                 if len(filtered) > 0 and len(np.unique(filtered)) >= 2:
                     breaks = jenks_breaks(filtered)
                     break_point = float(breaks[1])
@@ -539,7 +571,10 @@ class HolisticPUTrainer(BaseTrainer):
         assert self._unlabeled_base_indices is not None
         effective_indices = self._unlabeled_base_indices[: len(pseudo_targets)]
         self.pseudo_labels_map = dict(
-            zip(effective_indices.astype(int).tolist(), pseudo_targets.astype(int).tolist())
+            zip(
+                effective_indices.astype(int).tolist(),
+                pseudo_targets.astype(int).tolist(),
+            )
         )
 
         pseudo_pos = int((pseudo_targets == 0).sum())
@@ -548,7 +583,9 @@ class HolisticPUTrainer(BaseTrainer):
         metadata = getattr(base_dataset, "pu_metadata", {}) or {}
         labeled_value = metadata.get("pu_labeled_label", 1)
         n_labeled = int((as_numpy(base_dataset.pu_labels) == labeled_value).sum())
-        estimated_prior = (pseudo_pos + n_labeled) / max(1, len(pseudo_targets) + n_labeled)
+        estimated_prior = (pseudo_pos + n_labeled) / max(
+            1, len(pseudo_targets) + n_labeled
+        )
 
         self.console.log(
             f"HolisticPU pseudo labels: positive={pseudo_pos}, negative={pseudo_neg}, estimated_prior={estimated_prior:.4f}"
@@ -564,7 +601,11 @@ class HolisticPUTrainer(BaseTrainer):
         if hasattr(base_dataset, "true_labels"):
             true_labels = as_numpy(base_dataset.true_labels)[effective_indices]
             pseudo_eval = (pseudo_targets == 0).astype(np.int64)
-            acc = float((pseudo_eval == true_labels).mean()) if len(true_labels) else float("nan")
+            acc = (
+                float((pseudo_eval == true_labels).mean())
+                if len(true_labels)
+                else float("nan")
+            )
             self._last_phase_losses["pseudo_label_acc"] = acc
             if self.file_console:
                 self.file_console.log(f"pseudo_label_oracle_acc={acc:.6f}")
@@ -608,10 +649,14 @@ class HolisticPUTrainer(BaseTrainer):
                 logits_u, logits_u_s = logits[: 2 * batch_size].chunk(2)
                 logits_l_w, _logits_l_s = logits[2 * batch_size :].chunk(2)
 
-                targets_l = torch.zeros(batch_size, device=self.device, dtype=torch.long)
+                targets_l = torch.zeros(
+                    batch_size, device=self.device, dtype=torch.long
+                )
                 loss_x = F.cross_entropy(logits_l_w, targets_l)
 
-                pseudo_batch, pseudo_ptr = self._next_pseudo_targets(batch_size, pseudo_ptr)
+                pseudo_batch, pseudo_ptr = self._next_pseudo_targets(
+                    batch_size, pseudo_ptr
+                )
                 targets_u = torch.ones(batch_size, device=self.device, dtype=torch.long)
                 loss_u = self._source_loss_ft(
                     logits_u=logits_u,
@@ -655,7 +700,10 @@ class HolisticPUTrainer(BaseTrainer):
             batch = self.pseudo_targets_array[start:end]
         else:
             batch = np.concatenate(
-                [self.pseudo_targets_array[start:], self.pseudo_targets_array[: end - n]]
+                [
+                    self.pseudo_targets_array[start:],
+                    self.pseudo_targets_array[: end - n],
+                ]
             )
         next_start = end % n
         return torch.from_numpy(batch.astype(np.int64)).to(self.device), next_start

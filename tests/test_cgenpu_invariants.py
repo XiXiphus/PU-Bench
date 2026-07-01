@@ -4,7 +4,7 @@ import torch
 from torch import nn
 
 from train.cgenpu.trainer import CGenPUTrainer
-from train.checkpointing import CheckpointBundle
+from train.utils.checkpointing import CheckpointBundle
 
 
 class TestCGenPUInvariants(unittest.TestCase):

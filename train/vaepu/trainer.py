@@ -1,25 +1,26 @@
 from __future__ import annotations
+
+import numpy as np
 import torch
 import torch.nn.functional as F
-from torch import nn
-import numpy as np
 from sklearn.mixture import GaussianMixture
+from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from ..base_trainer import BaseTrainer
-from ..checkpointing import CheckpointBundle
-from ..metrics import _pu_label_values_from_loader
-from ..model_factory import select_model
+from ..utils.checkpointing import CheckpointBundle
+from ..utils.metrics import _pu_label_values_from_loader
+from ..utils.model_factory import select_model
 from .models import (
-    VAEencoder,
-    VAEdecoder,
-    Discriminator,
     ClassifierO,
     ClassifierPN,
-    VAEConvEncoder,
+    Discriminator,
     VAEConvDecoder,
     VAEConvDiscriminator,
+    VAEConvEncoder,
+    VAEdecoder,
+    VAEencoder,
 )
 
 
@@ -142,11 +143,7 @@ class VAEPUTrainer(BaseTrainer):
         else:
             self.pi_pu = float(pi_pu_default)
         self.pi_u = float(self.params.get("pi_u", pi_u_default))
-        self.pi_p = (
-            float(pi_given)
-            if pi_given is not None
-            else self.pi_pl + self.pi_pu
-        )
+        self.pi_p = float(pi_given) if pi_given is not None else self.pi_pl + self.pi_pu
 
         self.params.update(
             {
@@ -764,10 +761,11 @@ class VAEPUTrainer(BaseTrainer):
         for epoch in range(1, self.main_epochs + 1):
             self.global_epoch += 1
             self.train_one_epoch(epoch)
-            if (
-                self.validation_loader is not None
-                and self.threshold_selection not in {"fixed", "source", "none"}
-            ):
+            if self.validation_loader is not None and self.threshold_selection not in {
+                "fixed",
+                "source",
+                "none",
+            }:
                 try:
                     new_thr = self._compute_optimal_threshold_on_val(
                         self.threshold_selection
@@ -942,9 +940,7 @@ class VAEPUTrainer(BaseTrainer):
 
             recon_x = self.model_de(h_y, h_o)
             if self._uses_binary_image_likelihood():
-                bce = F.binary_cross_entropy_with_logits(
-                    recon_x, x, reduction="none"
-                )
+                bce = F.binary_cross_entropy_with_logits(recon_x, x, reduction="none")
                 loss = bce.view(bce.size(0), -1).sum(dim=1).mean()
             else:
                 mse = F.mse_loss(recon_x, x, reduction="none")
@@ -998,13 +994,11 @@ class VAEPUTrainer(BaseTrainer):
         h_y_l_np = h_y_l_mu.cpu().numpy()
         var = np.maximum(gmm.covariances_, 1e-9)
         c0 = np.mean(
-            -0.5 * np.square(h_y_l_np - gmm.means_[0]) / var[0]
-            - 0.5 * np.log(var[0]),
+            -0.5 * np.square(h_y_l_np - gmm.means_[0]) / var[0] - 0.5 * np.log(var[0]),
             axis=1,
         )
         c1 = np.mean(
-            -0.5 * np.square(h_y_l_np - gmm.means_[1]) / var[1]
-            - 0.5 * np.log(var[1]),
+            -0.5 * np.square(h_y_l_np - gmm.means_[1]) / var[1] - 0.5 * np.log(var[1]),
             axis=1,
         )
 
@@ -1022,9 +1016,7 @@ class VAEPUTrainer(BaseTrainer):
             self.p = torch.tensor(
                 gmm.weights_[1], device=self.device, dtype=torch.float32
             )
-            self.mu = torch.tensor(
-                gmm.means_, device=self.device, dtype=torch.float32
-            )
+            self.mu = torch.tensor(gmm.means_, device=self.device, dtype=torch.float32)
             self.var = torch.tensor(var, device=self.device, dtype=torch.float32)
 
         self.console.log(f"Estimated prior p: {self.p.item():.4f}", style="green")
@@ -1101,14 +1093,22 @@ class VAEPUTrainer(BaseTrainer):
             torch.as_tensor(p + 1e-9, device=self.device, dtype=h_y.dtype)
         )
 
-        c0 = -0.5 * torch.sum(
-            ((h_y - self.mu[0]) ** 2 / self.var[0]) + torch.log(self.var[0] + 1e-9),
-            dim=1,
-        ) + log_prior_neg
-        c1 = -0.5 * torch.sum(
-            ((h_y - self.mu[1]) ** 2 / self.var[1]) + torch.log(self.var[1] + 1e-9),
-            dim=1,
-        ) + log_prior_pos
+        c0 = (
+            -0.5
+            * torch.sum(
+                ((h_y - self.mu[0]) ** 2 / self.var[0]) + torch.log(self.var[0] + 1e-9),
+                dim=1,
+            )
+            + log_prior_neg
+        )
+        c1 = (
+            -0.5
+            * torch.sum(
+                ((h_y - self.mu[1]) ** 2 / self.var[1]) + torch.log(self.var[1] + 1e-9),
+                dim=1,
+            )
+            + log_prior_pos
+        )
         c = F.softmax(torch.stack([c0, c1], dim=1), dim=1)[:, 1].unsqueeze(1)
 
         loss1_0 = -0.5 * torch.sum(
@@ -1129,9 +1129,7 @@ class VAEPUTrainer(BaseTrainer):
 
         recon_x = self.model_de(h_y, h_o)
         if self._uses_binary_image_likelihood():
-            bce = F.binary_cross_entropy_with_logits(
-                recon_x, x_flat, reduction="none"
-            )
+            bce = F.binary_cross_entropy_with_logits(recon_x, x_flat, reduction="none")
             loss3 = -bce.view(bce.size(0), -1).sum(dim=1).mean()
         else:
             mse = F.mse_loss(recon_x, x_flat, reduction="none")
@@ -1339,9 +1337,8 @@ class VAEPUTrainer(BaseTrainer):
         elif scenario == "case-control":
             pa = 2 * self.prior * (correct_p / total_p) + (correct_u / total_u)
         else:
-            pa = (
-                2 * self.prior * (correct_p / total_p)
-                + (correct_p + correct_u) / (total_p + total_u)
+            pa = 2 * self.prior * (correct_p / total_p) + (correct_p + correct_u) / (
+                total_p + total_u
             )
 
         if len(scores_p) == 0 or len(scores_u) == 0:

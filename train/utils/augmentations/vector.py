@@ -73,7 +73,9 @@ class VectorAugPUDatasetWrapper(Dataset):
     def __len__(self) -> int:
         return len(self.base_dataset)
 
-    def __getitem__(self, index: int) -> Tuple[
+    def __getitem__(
+        self, index: int
+    ) -> Tuple[
         Tuple[torch.Tensor, torch.Tensor],
         torch.Tensor,
         torch.Tensor,

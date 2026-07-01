@@ -73,9 +73,7 @@ def _adapt_input_for_model(m: nn.Module, x: torch.Tensor) -> torch.Tensor:
         elif exp_c == 1:
             target_size = (28, 28)
     if target_size is not None and (h != target_size[0] or w != target_size[1]):
-        out = F.interpolate(
-            out, size=target_size, mode="bilinear", align_corners=False
-        )
+        out = F.interpolate(out, size=target_size, mode="bilinear", align_corners=False)
     return out
 
 
@@ -93,7 +91,15 @@ def _model_predict(model: nn.Module, x: torch.Tensor, device: torch.device):
         pos_score = torch.softmax(outputs, dim=1)[:, positive_index]
     else:
         raw = outputs.view(-1)
-        if torch.all(raw >= 0) and torch.all(raw <= 1):
+        pu_score_threshold = getattr(model, "pu_score_threshold", None)
+        if pu_score_threshold is not None:
+            threshold = torch.as_tensor(
+                pu_score_threshold, device=raw.device, dtype=raw.dtype
+            )
+            calibrated_raw = raw - threshold
+            preds_binary = (calibrated_raw >= 0).long()
+            pos_score = torch.sigmoid(calibrated_raw)
+        elif torch.all(raw >= 0) and torch.all(raw <= 1):
             preds_binary = (raw >= 0.5).long()
             pos_score = raw
         else:
@@ -206,18 +212,15 @@ def evaluate_proxy_metrics(
     elif scenario == "case-control":
         pa = 2 * prior * (correct_p / total_p) + (correct_u / total_u)
     else:
-        pa = (
-            2 * prior * (correct_p / total_p)
-            + (correct_p + correct_u) / (total_p + total_u)
+        pa = 2 * prior * (correct_p / total_p) + (correct_p + correct_u) / (
+            total_p + total_u
         )
 
     if len(scores_p) == 0 or len(scores_u) == 0:
         pauc = float("nan")
     else:
         try:
-            labels = np.concatenate(
-                [np.ones(len(scores_p)), np.zeros(len(scores_u))]
-            )
+            labels = np.concatenate([np.ones(len(scores_p)), np.zeros(len(scores_u))])
             scores = np.array(scores_p + scores_u)
             pauc = float(roc_auc_score(labels, scores))
         except ValueError:

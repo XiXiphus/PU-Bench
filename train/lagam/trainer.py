@@ -1,20 +1,23 @@
 from __future__ import annotations
+
+import math
+
+import numpy as np
 import torch
 import torch.nn.functional as F
-import numpy as np
-import math
-from torch.utils.data import DataLoader
 from sklearn.cluster import KMeans
 from sklearn.model_selection import train_test_split
+from torch.utils.data import DataLoader
+
+from data.data_utils import PUDataset
 
 from ..base_trainer import BaseTrainer
-from ..augmentations.vector import (
+from ..utils.augmentations.vector import (
     VectorStrongAugment,
     VectorWeakAugment,
 )
-from ..mixup import mixup_data
-from ..reproducibility import seed_worker
-from data.data_utils import PUDataset
+from ..utils.mixup import mixup_data
+from ..utils.reproducibility import seed_worker
 from .bce import LaGAMBCELoss
 from .contrastive import LaGAMContLoss
 from .dataset import (
@@ -221,7 +224,10 @@ class LaGAMTrainer(BaseTrainer):
             self.input_shape = tuple(sample_data.shape[1:])
 
     def _ensure_validation_split(self) -> None:
-        if self.validation_loader is not None and len(self.validation_loader.dataset) > 0:
+        if (
+            self.validation_loader is not None
+            and len(self.validation_loader.dataset) > 0
+        ):
             return
 
         val_ratio = float(self.params.get("lagam_val_ratio", 0.1))
@@ -291,9 +297,9 @@ class LaGAMTrainer(BaseTrainer):
             indices=torch.arange(local_len),
             pseudo_labels=dataset.pseudo_labels[idx_t],
             metadata=getattr(dataset, "pu_metadata", None),
-            source_indices=getattr(dataset, "source_indices", torch.arange(len(dataset)))[
-                idx_t
-            ],
+            source_indices=getattr(
+                dataset, "source_indices", torch.arange(len(dataset))
+            )[idx_t],
             source_roles=getattr(
                 dataset,
                 "source_roles",
@@ -390,9 +396,12 @@ class LaGAMTrainer(BaseTrainer):
             rate = float(self.params.get("lr_decay_rate", 0.1))
             eta_min = lr * (rate**3)
             total_epochs = max(1, int(self.params.get("num_epochs", 400)))
-            lr = eta_min + (lr - eta_min) * (
-                1.0 + math.cos(math.pi * epoch0 / total_epochs)
-            ) / 2.0
+            lr = (
+                eta_min
+                + (lr - eta_min)
+                * (1.0 + math.cos(math.pi * epoch0 / total_epochs))
+                / 2.0
+            )
         else:
             milestones = self.params.get("lr_decay_epochs", [250, 300, 350])
             if isinstance(milestones, str):
@@ -449,7 +458,10 @@ class LaGAMTrainer(BaseTrainer):
             ) * self.bce_loss(logits_mix, labels_b)
 
             loss_final = loss_cls + mix_weight * loss_mix
-            if isinstance(batch[0], (list, tuple)) and self.params.get("cont_weight", 1.0) != 0:
+            if (
+                isinstance(batch[0], (list, tuple))
+                and self.params.get("cont_weight", 1.0) != 0
+            ):
                 _, feat_cont_w = self._forward_logits_and_features(x)
                 _, feat_cont_s = self._forward_logits_and_features(x_s.to(self.device))
                 loss_cont = self.contrastive_loss(
@@ -459,7 +471,9 @@ class LaGAMTrainer(BaseTrainer):
                     logits,
                     start_knn_aug=False,
                 )
-                loss_final = loss_final + self.params.get("cont_weight", 1.0) * loss_cont
+                loss_final = (
+                    loss_final + self.params.get("cont_weight", 1.0) * loss_cont
+                )
             loss_final.backward()
             self.optimizer.step()
 
@@ -689,11 +703,15 @@ class LaGAMTrainer(BaseTrainer):
         if hasattr(train_dataset, "update_targets"):
             final_indices_to_update = all_indices[update_mask]
             final_labels_to_update = all_updated_labels[update_mask]
-            train_dataset.update_targets(final_labels_to_update, final_indices_to_update)
+            train_dataset.update_targets(
+                final_labels_to_update, final_indices_to_update
+            )
 
             base_dataset = getattr(train_dataset, "base_dataset", None)
             if isinstance(base_dataset, PUDataset):
-                base_dataset.pseudo_labels[final_indices_to_update] = final_labels_to_update
+                base_dataset.pseudo_labels[final_indices_to_update] = (
+                    final_labels_to_update
+                )
                 true_labels_updated = base_dataset.true_labels[final_indices_to_update]
                 corrected_binary_labels = (final_labels_to_update > 0.5).long()
                 acc = (corrected_binary_labels == true_labels_updated).float().mean()
@@ -706,7 +724,9 @@ class LaGAMTrainer(BaseTrainer):
         """Use eval_loader (test transforms) to compute features like original LaGAM."""
         self.model.eval()
         if not hasattr(self, "eval_loader") or self.eval_loader is None:
-            raise RuntimeError("LaGAM requires a deterministic eval_loader for clustering.")
+            raise RuntimeError(
+                "LaGAM requires a deterministic eval_loader for clustering."
+            )
         loader = self.eval_loader
         num_samples = len(self.eval_loader.dataset)
 

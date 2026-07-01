@@ -31,7 +31,7 @@ from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.data import DataLoader, Subset
 
 from ..base_trainer import BaseTrainer
-from ..schedules import sigmoid_rampup
+from ..utils.schedules import sigmoid_rampup
 from .model_selector import select_model
 from .source_adapter import (
     create_p3mix_source_ema,
@@ -275,8 +275,9 @@ class P3MIXETrainer(BaseTrainer):
                 u_loader_iter = iter(self.u_loader)
                 data_u, _, _, _, _ = next(u_loader_iter)
 
-            data_p, data_u = data_p.to(self.device, non_blocking=True), data_u.to(
-                self.device, non_blocking=True
+            data_p, data_u = (
+                data_p.to(self.device, non_blocking=True),
+                data_u.to(self.device, non_blocking=True),
             )
             target_p = torch.ones(
                 data_p.shape[0], device=self.device, dtype=torch.float32
@@ -284,9 +285,10 @@ class P3MIXETrainer(BaseTrainer):
             target_u = torch.zeros(
                 data_u.shape[0], device=self.device, dtype=torch.float32
             )[:, None]
-            target_p_, target_u_ = torch.cat(
-                (1.0 - target_p, target_p), dim=1
-            ), torch.cat((1.0 - target_u, target_u), dim=1)
+            target_p_, target_u_ = (
+                torch.cat((1.0 - target_p, target_p), dim=1),
+                torch.cat((1.0 - target_u, target_u), dim=1),
+            )
             data = torch.cat((data_p, data_u), dim=0)
             targets_ = torch.cat((target_p_, target_u_), dim=0)
             idx_p, idx_u = slice(0, len(data_p)), slice(len(data_p), len(data))

@@ -12,11 +12,14 @@ Active source files are ``train.py``, ``utils.py``, ``losses/distributionLoss.py
 from __future__ import annotations
 
 import math
-import torch
 from typing import Any
+
+import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
+from ..base_trainer import BaseTrainer
+from ..utils.reproducibility import seed_worker
 from .core import (
     MixupDataset,
     distpu_entropy_loss,
@@ -24,8 +27,6 @@ from .core import (
     mixup_two_targets,
 )
 from .losses import LabelDistributionLoss
-from ..base_trainer import BaseTrainer
-from ..reproducibility import seed_worker
 
 
 class DistPUTrainer(BaseTrainer):
@@ -102,9 +103,7 @@ class DistPUTrainer(BaseTrainer):
             psudos[t == 1] = 1.0
 
             alpha = stage_params.get("alpha", 1.0)
-            mixed_x, y_a, y_b, lam = mixup_two_targets(
-                x, psudos, alpha, self.device
-            )
+            mixed_x, y_a, y_b, lam = mixup_two_targets(x, psudos, alpha, self.device)
 
             logits_orig = torch.clamp(self.model(x).squeeze(), min=-10, max=10)
             scores_orig = torch.sigmoid(logits_orig)
@@ -241,7 +240,9 @@ class DistPUTrainer(BaseTrainer):
         )
         if stage_name == "mixup":
             eta_min = float(stage_params.get("eta_min", 0.7 * lr))
-            t_max = int(stage_params.get("scheduler_t_max", stage_params.get("epochs", 1)))
+            t_max = int(
+                stage_params.get("scheduler_t_max", stage_params.get("epochs", 1))
+            )
             self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                 self.optimizer, t_max, eta_min=eta_min
             )
@@ -280,7 +281,9 @@ class DistPUTrainer(BaseTrainer):
                     self.file_console.log("\n--- [Stage 1/2] Dist-PU Warm-up ---")
                 self._set_stage("warm_up", self.warm_up_cfg)
                 with self.suspend_checkpointing():
-                    final_metrics = self.run_stage("Warm-up", self.warm_up_cfg["epochs"])
+                    final_metrics = self.run_stage(
+                        "Warm-up", self.warm_up_cfg["epochs"]
+                    )
 
             # Mixup stage
             if self.mixup_cfg and self.mixup_cfg.get("epochs", 0) > 0:

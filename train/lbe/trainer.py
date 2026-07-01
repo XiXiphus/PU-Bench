@@ -5,8 +5,8 @@ from torch.optim import Adam
 from tqdm import tqdm
 
 from ..base_trainer import BaseTrainer
-from ..checkpointing import CheckpointBundle
-from ..model_factory import select_model
+from ..utils.checkpointing import CheckpointBundle
+from ..utils.model_factory import select_model
 from .core import (
     m_step_classifier_per_sample_loss,
     m_step_eta_loss,
@@ -242,9 +242,7 @@ class LBETrainer(BaseTrainer):
                         .to(storage_device)
                     )
             classifier_losses_all = torch.cat(classifier_losses, dim=0)
-            keep_pos = classifier_losses_all.topk(
-                largest=False, k=keep_count
-            )[1]
+            keep_pos = classifier_losses_all.topk(largest=False, k=keep_count)[1]
             kept_subset_idx = subset_idx.index_select(0, keep_pos)
 
             self.optimizer.zero_grad(set_to_none=True)
@@ -300,10 +298,10 @@ class LBETrainer(BaseTrainer):
             reset=True,
         )
         try:
-            self.run_stage(
-                "EM-Training", self.params.get("num_epochs", 100)
+            self.run_stage("EM-Training", self.params.get("num_epochs", 100))
+            return (
+                self.checkpoint_handler.best_metrics if self.checkpoint_handler else {}
             )
-            return self.checkpoint_handler.best_metrics if self.checkpoint_handler else {}
         finally:
             self.finalize()
 

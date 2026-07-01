@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from backbone.models import (
-    CNN_AlzheimerMRI,
     CNN_CIFAR10,
-    CNN_FashionMNIST,
     CNN_MNIST,
-    MLP_20News,
     MLP_IMDB,
+    CNN_AlzheimerMRI,
+    CNN_FashionMNIST,
+    MLP_20News,
 )
 
 

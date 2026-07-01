@@ -25,7 +25,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from ..base_trainer import BaseTrainer
-from ..reproducibility import seed_worker
+from ..utils.reproducibility import seed_worker
 from .losses import (
     PULDALabelDistributionLoss,
     PULDALabelDistributionLossWithEMA,

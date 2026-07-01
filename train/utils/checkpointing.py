@@ -231,7 +231,7 @@ class ModelCheckpoint:
 
         def _extract(prefix):
             return {
-                k[len(prefix):]: v
+                k[len(prefix) :]: v
                 for k, v in self.best_metrics.items()
                 if k.startswith(prefix)
             }

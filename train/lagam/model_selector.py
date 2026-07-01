@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..model_factory import infer_model_name
+from ..utils.model_factory import infer_model_name
 from .models import (
     MetaCNN_AlzheimerMRI,
     MetaCNN_CIFAR10,

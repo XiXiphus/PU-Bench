@@ -39,8 +39,8 @@ from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
 from ..base_trainer import BaseTrainer
-from ..metrics import evaluate_metrics, evaluate_proxy_metrics
-from ..reproducibility import seed_worker
+from ..utils.metrics import evaluate_metrics, evaluate_proxy_metrics
+from ..utils.reproducibility import seed_worker
 from .losses import (
     binary_cross_entropy_loss,
     focal_binary_loss,
@@ -156,7 +156,9 @@ class RobustPUTrainer(BaseTrainer):
                 style="bold yellow",
             )
             if self.file_console:
-                self.file_console.log("--- [Stage 1/2] Robust-PU: nnPU pre-training ---")
+                self.file_console.log(
+                    "--- [Stage 1/2] Robust-PU: nnPU pre-training ---"
+                )
             self._pre_train()
 
         if self.robust_cfg.episodes > 0:
@@ -221,7 +223,9 @@ class RobustPUTrainer(BaseTrainer):
                 main.get("inner_epochs", self.params.get("inner_epochs", 1))
             ),
             main_lr=float(main.get("lr", self.params.get("lr", 1e-4))),
-            main_weight_decay=float(main.get("weight_decay", self.params.get("wd", 0.0))),
+            main_weight_decay=float(
+                main.get("weight_decay", self.params.get("wd", 0.0))
+            ),
             main_batch_size=int(
                 main.get(
                     "batch_size",
@@ -232,11 +236,17 @@ class RobustPUTrainer(BaseTrainer):
             main_optimizer=str(
                 main.get("optimizer", self.params.get("optimizer", "adam"))
             ).lower(),
-            hardness=str(main.get("hardness", self.params.get("hardness", "logistic"))).lower(),
-            spl_type=str(main.get("spl_type", self.params.get("spl_type", "welsch"))).lower(),
+            hardness=str(
+                main.get("hardness", self.params.get("hardness", "logistic"))
+            ).lower(),
+            spl_type=str(
+                main.get("spl_type", self.params.get("spl_type", "welsch"))
+            ).lower(),
             temper_p=float(scheduler_p.get("temper", main.get("temper_p", 1.0))),
             temper_n=float(scheduler_n.get("temper", main.get("temper_n", 1.3))),
-            focal_gamma=float(main.get("focal_gamma", self.params.get("focal_gamma", 1.0))),
+            focal_gamma=float(
+                main.get("focal_gamma", self.params.get("focal_gamma", 1.0))
+            ),
             phi=float(main.get("moving_ratio", self.params.get("phi", 0.0))),
             restart=bool(main.get("restart", self.params.get("restart", False))),
         )
@@ -284,7 +294,9 @@ class RobustPUTrainer(BaseTrainer):
             )
         self.prior = risk_prior
 
-    def _set_checkpoint_early_stopping(self, enabled: bool, *, reset: bool = False) -> None:
+    def _set_checkpoint_early_stopping(
+        self, enabled: bool, *, reset: bool = False
+    ) -> None:
         self.set_checkpoint_early_stopping(enabled, reset=reset)
 
     def _reset_checkpoint_for_main_stage(self) -> None:
@@ -360,7 +372,9 @@ class RobustPUTrainer(BaseTrainer):
                 best_pretrain_score = pretrain_score
                 best_state = copy.deepcopy(self.model.state_dict())
 
-        if best_state is not None and bool(self.params.get("restore_best_pretrain", True)):
+        if best_state is not None and bool(
+            self.params.get("restore_best_pretrain", True)
+        ):
             self.model.load_state_dict(best_state)
         if cfg.pre_calibration:
             self._apply_pretrain_calibration(cfg.pre_calibration)
@@ -400,7 +414,9 @@ class RobustPUTrainer(BaseTrainer):
                 "RobustPU validation calibration requires a validation loader. "
                 "Set a positive val_ratio or disable pre_train.calibration."
             )
-        logits, true_labels = self._collect_logits_and_true_labels(self.validation_loader)
+        logits, true_labels = self._collect_logits_and_true_labels(
+            self.validation_loader
+        )
         threshold, accuracy = self._best_binary_accuracy_threshold(logits, true_labels)
         head = self._last_single_logit_linear()
         if head is None:
@@ -442,7 +458,9 @@ class RobustPUTrainer(BaseTrainer):
         logits = logits.detach().cpu().view(-1).float()
         true_labels = true_labels.detach().cpu().view(-1).long()
         if logits.numel() == 0:
-            raise ValueError("Cannot calibrate RobustPU logits on an empty validation set.")
+            raise ValueError(
+                "Cannot calibrate RobustPU logits on an empty validation set."
+            )
         sorted_logits, _ = torch.sort(logits)
         candidates = [float(sorted_logits[0].item() - 1.0)]
         candidates.extend(
@@ -503,7 +521,9 @@ class RobustPUTrainer(BaseTrainer):
                 self._train_weighted_epoch(weighted_loader, optimizer, criterion)
                 self.global_epoch += 1
 
-                train_metrics, val_metrics, test_metrics = self._evaluate_current_model()
+                train_metrics, val_metrics, test_metrics = (
+                    self._evaluate_current_model()
+                )
                 self._print_metrics(
                     inner_epoch,
                     cfg.inner_epochs,

@@ -4,18 +4,19 @@ from __future__ import annotations
 
 from typing import Tuple
 
+from data.AlzheimerMRI_PU import load_alzheimer_mri_pu
+from data.CIFAR10_PU import load_cifar10_pu
 from data.data_utils import (
-    PUDataloader,
     PU_SAMPLING_REFERENCES,
+    PUDataloader,
     canonical_case_control_mode,
     get_pu_risk_prior,
 )
-from data.CIFAR10_PU import load_cifar10_pu
 from data.FashionMNIST_PU import load_fashionmnist_pu
-from data.MNIST_PU import load_mnist_pu
-from data.AlzheimerMRI_PU import load_alzheimer_mri_pu
-from data.News20_PU import load_20news_pu
 from data.IMDB_PU import load_imdb_pu
+from data.MNIST_PU import load_mnist_pu
+from data.News20_PU import load_20news_pu
+
 from .reproducibility import seed_worker
 
 

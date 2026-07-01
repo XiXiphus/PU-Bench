@@ -5,7 +5,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from data.data_utils import PUDataset
-from train.metrics import evaluate_metrics
+from train.utils.metrics import evaluate_metrics
 
 
 class NegativeLogitRanker(nn.Module):

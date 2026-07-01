@@ -12,8 +12,8 @@ from __future__ import annotations
 import ast
 import json
 import re
-import sys
 import subprocess
+import sys
 import tempfile
 import traceback
 from dataclasses import dataclass, field
@@ -22,10 +22,11 @@ from typing import Any
 
 import yaml
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 METHODS_DIR = PROJECT_ROOT / "config" / "methods"
-MNIST_SEED2_CONFIG = PROJECT_ROOT / "config" / "datasets_smoke" / "param_sweep_mnist_seed2.yaml"
+MNIST_SEED2_CONFIG = (
+    PROJECT_ROOT / "config" / "datasets_smoke" / "param_sweep_mnist_seed2.yaml"
+)
 RUN_TRAIN = PROJECT_ROOT / "run_train.py"
 MOVED_METRIC_SYMBOLS = (
     "_dataset_metadata",
@@ -40,18 +41,22 @@ REMOVED_FILES = (
     PROJECT_ROOT / "data" / "vector_augment.py",
 )
 MOVED_MODULE_SYMBOLS = {
-    "train.metrics": MOVED_METRIC_SYMBOLS,
-    "train.data_factory": ("prepare_loaders",),
-    "train.model_factory": ("infer_model_name", "select_model", "select_public_model"),
+    "train.utils.metrics": MOVED_METRIC_SYMBOLS,
+    "train.utils.data_factory": ("prepare_loaders",),
+    "train.utils.model_factory": (
+        "infer_model_name",
+        "select_model",
+        "select_public_model",
+    ),
     "train.common.pu_risk": ("PULoss", "choose_loss", "pu_loss"),
-    "train.mixup": ("mixup_data", "mixup_criterion"),
-    "train.schedules": ("sigmoid_rampup", "linear_rampup"),
-    "train.augmentations.vector": (
+    "train.utils.mixup": ("mixup_data", "mixup_criterion"),
+    "train.utils.schedules": ("sigmoid_rampup", "linear_rampup"),
+    "train.utils.augmentations.vector": (
         "VectorWeakAugment",
         "VectorStrongAugment",
         "VectorAugPUDatasetWrapper",
     ),
-    "train.checkpointing": (
+    "train.utils.checkpointing": (
         "ModelCheckpoint",
         "CheckpointBundle",
     ),
@@ -435,7 +440,9 @@ def _check_upu_fail_fast_dry_run(report: CheckReport) -> None:
 
 
 def _check_removed_files(report: CheckReport) -> None:
-    retained = [path.relative_to(PROJECT_ROOT) for path in REMOVED_FILES if path.exists()]
+    retained = [
+        path.relative_to(PROJECT_ROOT) for path in REMOVED_FILES if path.exists()
+    ]
     if retained:
         report.fail(
             "Breaking refactor requires these old files to be removed: "
@@ -453,7 +460,9 @@ def _check_module_symbol_contracts(report: CheckReport) -> None:
         try:
             module = importlib.import_module(module_name)
         except Exception as exc:  # noqa: BLE001
-            failures.append(f"{module_name}: import failed ({type(exc).__name__}: {exc})")
+            failures.append(
+                f"{module_name}: import failed ({type(exc).__name__}: {exc})"
+            )
             continue
         missing = [symbol for symbol in symbols if not hasattr(module, symbol)]
         if missing:
@@ -473,7 +482,9 @@ def _check_module_symbol_contracts(report: CheckReport) -> None:
             if base_cls is None or not hasattr(base_cls, name)
         ]
         if missing:
-            failures.append("BaseTrainer missing lifecycle methods: " + ", ".join(missing))
+            failures.append(
+                "BaseTrainer missing lifecycle methods: " + ", ".join(missing)
+            )
 
     if failures:
         report.fail("Moved module contract mismatch:\n" + "\n".join(failures))
@@ -512,8 +523,7 @@ def _check_removed_legacy_imports(report: CheckReport) -> None:
 
     if offenders:
         report.fail(
-            "Legacy train_utils/vector_augment imports remain:\n"
-            + "\n".join(offenders)
+            "Legacy train_utils/vector_augment imports remain:\n" + "\n".join(offenders)
         )
     else:
         report.ok("No project Python file imports removed legacy modules.")
@@ -521,25 +531,25 @@ def _check_removed_legacy_imports(report: CheckReport) -> None:
 
 def _check_metrics_extraction_contracts(report: CheckReport) -> None:
     try:
-        import train.metrics as metrics_module
+        import train.utils.metrics as metrics_module
     except Exception as exc:  # noqa: BLE001
         report.fail(
-            "Failed to import train.metrics for extraction check.\n"
+            "Failed to import train.utils.metrics for extraction check.\n"
             f"Exception: {type(exc).__name__}: {exc}\n"
             f"{traceback.format_exc().rstrip()}"
         )
         return
 
     missing = [
-        symbol
-        for symbol in MOVED_METRIC_SYMBOLS
-        if not hasattr(metrics_module, symbol)
+        symbol for symbol in MOVED_METRIC_SYMBOLS if not hasattr(metrics_module, symbol)
     ]
 
     if missing:
-        report.fail("train.metrics is missing moved symbols: " + ", ".join(missing))
+        report.fail(
+            "train.utils.metrics is missing moved symbols: " + ", ".join(missing)
+        )
     else:
-        report.ok("train.metrics exposes the moved metric symbols.")
+        report.ok("train.utils.metrics exposes the moved metric symbols.")
 
 
 def _project_python_files() -> list[Path]:
@@ -627,13 +637,13 @@ def _check_no_staged_checkpoint_internal_writes(report: CheckReport) -> None:
 
 
 def _check_model_factory_boundary(report: CheckReport) -> None:
-    model_factory = PROJECT_ROOT / "train" / "model_factory.py"
+    model_factory = PROJECT_ROOT / "train" / "utils" / "model_factory.py"
     try:
         source = model_factory.read_text(encoding="utf-8")
         tree = ast.parse(source)
     except Exception as exc:  # noqa: BLE001
         report.fail(
-            "Failed to parse train/model_factory.py for Phase 4 boundary check.\n"
+            "Failed to parse train/utils/model_factory.py for Phase 4 boundary check.\n"
             f"Exception: {type(exc).__name__}: {exc}"
         )
         return
@@ -643,7 +653,9 @@ def _check_model_factory_boundary(report: CheckReport) -> None:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 imported = alias.name.lower()
-                if any(fragment in imported for fragment in METHOD_PRIVATE_MODEL_FRAGMENTS):
+                if any(
+                    fragment in imported for fragment in METHOD_PRIVATE_MODEL_FRAGMENTS
+                ):
                     offenders.append(f"line {node.lineno}: import {alias.name}")
         elif isinstance(node, ast.ImportFrom):
             module = (node.module or "").lower()
@@ -661,7 +673,9 @@ def _check_model_factory_boundary(report: CheckReport) -> None:
             + "\n".join(offenders)
         )
     else:
-        report.ok("Shared model_factory contains only public benchmark model selection.")
+        report.ok(
+            "Shared model_factory contains only public benchmark model selection."
+        )
 
 
 def _check_no_cross_method_nnpu_loss_imports(report: CheckReport) -> None:
@@ -779,7 +793,9 @@ def _check_namespaced_config_dry_run(report: CheckReport) -> None:
             + output.rstrip()
         )
     else:
-        report.ok("Namespaced dataset/method config dry-run matches legacy MNIST seed2.")
+        report.ok(
+            "Namespaced dataset/method config dry-run matches legacy MNIST seed2."
+        )
 
 
 def _check_plan_json_export(report: CheckReport) -> None:
@@ -812,8 +828,7 @@ def _check_plan_json_export(report: CheckReport) -> None:
         output = _combined_output(completed)
         if completed.returncode != 0:
             report.fail(
-                "Plan JSON dry-run command failed.\n"
-                f"Output:\n{output.rstrip()}"
+                f"Plan JSON dry-run command failed.\nOutput:\n{output.rstrip()}"
             )
             return
         try:
@@ -843,14 +858,16 @@ def _check_plan_json_export(report: CheckReport) -> None:
 
 
 def _check_no_unread_method_config_keys(report: CheckReport) -> None:
+    dynamic_map_keys = {
+        "source_hparams_by_dataset",
+        "source_partial_hparams_by_dataset",
+        "recommended_hparams_by_dataset",
+    }
     shared_paths = [
         PROJECT_ROOT / "train" / "base",
         PROJECT_ROOT / "train" / "base_trainer.py",
-        PROJECT_ROOT / "train" / "checkpointing.py",
-        PROJECT_ROOT / "train" / "data_factory.py",
-        PROJECT_ROOT / "train" / "metrics.py",
-        PROJECT_ROOT / "train" / "model_factory.py",
-        PROJECT_ROOT / "train" / "reproducibility.py",
+        PROJECT_ROOT / "train" / "utils",
+        PROJECT_ROOT / "config" / "experiment_plan.py",
     ]
     shared_text = _read_python_text(shared_paths)
     offenders: list[str] = []
@@ -881,6 +898,8 @@ def _check_no_unread_method_config_keys(report: CheckReport) -> None:
             if isinstance(value, dict):
                 candidates.extend((key, subkey) for subkey in value)
             for top_key, subkey in candidates:
+                if subkey is not None and top_key in dynamic_map_keys:
+                    continue
                 token = str(subkey or top_key)
                 pattern = re.compile(
                     r"(?<![A-Za-z0-9_])" + re.escape(token) + r"(?![A-Za-z0-9_])"
@@ -915,7 +934,7 @@ def _read_python_text(paths: list[Path]) -> str:
 
 def _check_proxy_metric_label_contract(report: CheckReport) -> None:
     banned_patterns = {
-        PROJECT_ROOT / "train" / "metrics.py": (
+        PROJECT_ROOT / "train" / "utils" / "metrics.py": (
             "p_mask = t == 1",
             "u_mask = t != 1",
         ),
@@ -946,7 +965,7 @@ def _check_proxy_metric_label_contract(report: CheckReport) -> None:
         from torch import nn
         from torch.utils.data import DataLoader, Dataset
 
-        from train.metrics import evaluate_proxy_metrics
+        from train.utils.metrics import evaluate_proxy_metrics
 
         class _ProxyDataset(Dataset):
             pu_metadata = {"pu_labeled_label": 7, "pu_unlabeled_label": -3}
@@ -1003,9 +1022,7 @@ def _print_summary(report: CheckReport) -> None:
     for message in report.failed:
         print(f"[FAIL] {message}")
 
-    print(
-        f"\nSummary: {len(report.passed)} passed, {len(report.failed)} failed."
-    )
+    print(f"\nSummary: {len(report.passed)} passed, {len(report.failed)} failed.")
 
 
 def main() -> int:

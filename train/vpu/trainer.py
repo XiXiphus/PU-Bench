@@ -20,12 +20,13 @@ Implementation contract:
 from __future__ import annotations
 
 import argparse
+
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Subset
 
 from ..base_trainer import BaseTrainer
-from ..reproducibility import seed_worker
+from ..utils.reproducibility import seed_worker
 from .losses import VPULoss
 
 
@@ -72,11 +73,15 @@ class VPUTrainer(BaseTrainer):
         pin_memory = bool(torch.cuda.is_available())
 
         pu_labels = dataset.pu_labels.detach().cpu()
-        positive_indices = torch.nonzero(pu_labels == 1, as_tuple=False).view(-1).tolist()
+        positive_indices = (
+            torch.nonzero(pu_labels == 1, as_tuple=False).view(-1).tolist()
+        )
         if not positive_indices:
             raise ValueError("VPU requires a non-empty labeled-positive set P.")
 
-        drop_x = bool(self.params.get("vpu_drop_last", True)) and len(dataset) >= batch_size
+        drop_x = (
+            bool(self.params.get("vpu_drop_last", True)) and len(dataset) >= batch_size
+        )
         drop_p = (
             bool(self.params.get("vpu_drop_last", True))
             and len(positive_indices) >= batch_size
@@ -225,7 +230,9 @@ class VPUTrainer(BaseTrainer):
         self._maybe_apply_source_lr_decay(epoch_idx)
 
         iterations = int(
-            self.params.get("val_iterations", self.params.get("vpu_iterations_per_epoch", 30))
+            self.params.get(
+                "val_iterations", self.params.get("vpu_iterations_per_epoch", 30)
+            )
         )
         beta_dist = torch.distributions.beta.Beta(
             self.criterion.mix_alpha,

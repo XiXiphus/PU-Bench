@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..model_factory import infer_model_name, select_public_model
+from ..utils.model_factory import infer_model_name, select_public_model
 from .models import select_private_model
 
 

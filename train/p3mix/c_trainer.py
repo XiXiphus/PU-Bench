@@ -30,7 +30,7 @@ from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.data import DataLoader, Subset
 
 from ..base_trainer import BaseTrainer
-from ..schedules import sigmoid_rampup
+from ..utils.schedules import sigmoid_rampup
 from .model_selector import select_model
 from .source_adapter import (
     create_p3mix_source_ema,

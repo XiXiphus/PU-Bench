@@ -6,7 +6,7 @@ from datetime import datetime
 
 import torch
 
-from ..metrics import evaluate_metrics
+from ..utils.metrics import evaluate_metrics
 
 
 class ResultSummaryMixin:

@@ -31,6 +31,7 @@ from __future__ import annotations
 import torch
 
 from ..base_trainer import BaseTrainer
+from ..utils.metrics import _adapt_input_for_model
 from .losses import nnPUSBloss
 
 
@@ -88,6 +89,70 @@ class NNPUSBTrainer(BaseTrainer):
         gamma = float(self.params.get("gamma", 1.0))
         beta = float(self.params.get("beta", 0.0))
         return nnPUSBloss(self.prior, nnPU=True, gamma=gamma, beta=beta)
+
+    def _threshold_prior(self) -> float:
+        metadata = getattr(
+            getattr(self.train_loader, "dataset", None), "pu_metadata", {}
+        )
+        if not isinstance(metadata, dict):
+            metadata = {}
+
+        prior = metadata.get("pi_constructed_train")
+        if prior is None:
+            n_labeled = metadata.get("n_labeled")
+            n_unlabeled = metadata.get("n_unlabeled")
+            if n_labeled is not None and n_unlabeled is not None:
+                total = int(n_labeled) + int(n_unlabeled)
+                if total > 0:
+                    prior = (
+                        int(n_labeled) + float(self.prior) * int(n_unlabeled)
+                    ) / total
+
+        if prior is None:
+            prior = self.prior
+
+        prior = float(prior)
+        if not 0.0 < prior < 1.0:
+            raise ValueError(f"nnPUSB threshold prior must be in (0, 1), got {prior}.")
+        return prior
+
+    def calibrate_decision_threshold(self) -> torch.Tensor:
+        """Set source-style inference threshold from all training raw scores."""
+
+        was_training = self.model.training
+        self.model.eval()
+
+        raw_scores = []
+        with torch.no_grad():
+            for x, *_ in self.train_loader:  # type: ignore
+                if isinstance(x, (list, tuple)):
+                    x = x[0]
+                x = _adapt_input_for_model(self.model, x.to(self.device))
+                raw_scores.append(self.model(x).view(-1).detach())
+
+        if was_training:
+            self.model.train()
+
+        if not raw_scores:
+            raise ValueError("Cannot calibrate nnPUSB threshold from an empty loader.")
+
+        scores = torch.cat(raw_scores, dim=0)
+        sorted_scores, _ = torch.sort(scores, dim=0)
+        threshold_prior = self._threshold_prior()
+        threshold_index = int((1.0 - threshold_prior) * len(sorted_scores))
+        threshold_index = max(0, min(threshold_index, len(sorted_scores) - 1))
+        threshold = sorted_scores[threshold_index].detach()
+
+        self.decision_threshold = threshold
+        self.threshold_prior = threshold_prior
+        self.threshold_index = threshold_index
+        self.model.pu_score_threshold = threshold
+        self.model.pu_threshold_prior = threshold_prior
+        return threshold
+
+    def evaluate(self):
+        self.calibrate_decision_threshold()
+        return super().evaluate()
 
     def train_one_epoch(self, epoch_idx: int):
         self.model.train()

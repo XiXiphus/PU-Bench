@@ -11,7 +11,7 @@ from backbone.models import (
     HolisticPU_MLP_IMDB,
 )
 
-from ..model_factory import infer_model_name
+from ..utils.model_factory import infer_model_name
 from .models import select_private_model
 
 

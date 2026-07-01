@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import torch
 
+from ..utils.data_factory import prepare_loaders
+from ..utils.model_factory import select_model
 from .constants import SOURCE_FAITHFUL_NO_BIAS_INIT
-from ..data_factory import prepare_loaders
-from ..model_factory import select_model
 
 
 class DataModelMixin:
@@ -86,7 +86,10 @@ class DataModelMixin:
                 return _math.log(_p / (1.0 - _p))
 
             fc = getattr(self.model, "final_classifier", None)
-            if isinstance(fc, torch.nn.Linear) and getattr(fc, "bias", None) is not None:
+            if (
+                isinstance(fc, torch.nn.Linear)
+                and getattr(fc, "bias", None) is not None
+            ):
                 if int(getattr(fc, "out_features", 0)) == 1:
                     with torch.no_grad():
                         fc.bias.fill_(_logit(self.prior))

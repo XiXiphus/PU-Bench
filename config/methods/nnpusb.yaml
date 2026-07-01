@@ -14,9 +14,11 @@ nnpusb:
       source_references:
         - "https://github.com/MasaKat0/PUlearning/blob/3401b77ccdd653d39f4f3a6258a42c7938fa9ede/BiasedPUlearning/nnPUSB/main_nnPUSB_mnist.py"
         - "https://github.com/MasaKat0/PUlearning/blob/3401b77ccdd653d39f4f3a6258a42c7938fa9ede/BiasedPUlearning/nnPUSB/train_nnPU.py"
+        - "https://github.com/TimoM99/PUBiasCalibration/blob/main/src/PUBiasCalibration/Models/PUSB.py"
       retained_source_components:
         - "selected-bias positives use the source mean-normalize then max-normalize accept-reject rule when SAR-PUSB selection is requested"
         - "logistic nnPU risk with beta=0 and gamma=1 equivalent to source negative-risk correction"
+        - "post-training all-train raw-score quantile thresholding for calibrated inference"
         - "source main_nnPUSB_mnist.py optimizer and schedule recipe for MNIST"
         - "PU labels +1 for labeled positives and source unlabeled label 0 mapped to PU-Bench -1"
         - "risk prior is the positive fraction inside U"
